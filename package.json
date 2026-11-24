@@ -1,0 +1,9 @@
+{
+  "name": "map-site",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Public map website shell (served at /); the iD editor lives at /edit/",
+  "dependencies": {
+    "maplibre-gl": "^5.0.0"
+  }
+}
