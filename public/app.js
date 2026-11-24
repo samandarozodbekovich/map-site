@@ -498,7 +498,11 @@
     var live = QUERY_LAYERS.filter(function (id) { return map.getLayer(id); });
     if (!live.length) return null;
     var f = map.queryRenderedFeatures([[pt.x - r, pt.y - r], [pt.x + r, pt.y + r]], { layers: live });
-    return f.length ? f[0] : null;
+    if (!f.length) return null;
+    // a point of interest beats the building / road / area under it, even when that area is drawn on top
+    var rank = { poi: 0, building: 1, highway: 2 };
+    f.sort(function (x, y) { return (rank[x.sourceLayer] === undefined ? 9 : rank[x.sourceLayer]) - (rank[y.sourceLayer] === undefined ? 9 : rank[y.sourceLayer]); });
+    return f[0];
   }
   function featureHtml(f) {
     if (!f) return '<p>' + esc(t('none')) + '</p>';
@@ -506,10 +510,26 @@
     return '<dl class="kv"><dt>' + t('layer') + '</dt><dd>' + esc(f.sourceLayer) + '</dd>' +
       (p.name ? '<dt>' + t('name') + '</dt><dd>' + esc(p.name) + '</dd>' : '') + '</dl>';
   }
+  // Full record from the database (GET /api/feature/); the tiles only carry a few properties
+  var DETAIL_LAYERS = { building: 1, poi: 1, highway: 1 };
+  function loadDetails(arg) {
+    if (!DETAIL_LAYERS[arg.f.sourceLayer]) return;
+    arg.loading = true;
+    fetch('/api/feature/?layer=' + arg.f.sourceLayer + '&lon=' + arg.lngLat.lng.toFixed(6) + '&lat=' + arg.lngLat.lat.toFixed(6) + '&zoom=' + map.getZoom().toFixed(1))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; })
+      .then(function (d) {
+        arg.loading = false;
+        if (d && d.found) arg.detail = d;
+        if (current === 'object' && currentArg === arg) render();
+      });
+  }
   map.on('click', function (e) {
     var f = featureAt(e.point, 5);
     if (!f) return;
-    openPanel('object', { f: f, lngLat: e.lngLat });
+    var arg = { f: f, lngLat: e.lngLat, detail: null, loading: false };
+    openPanel('object', arg);
+    loadDetails(arg);
   });
   map.on('mousemove', function (e) { map.getCanvas().style.cursor = featureAt(e.point, 3) ? 'pointer' : ''; });
 
@@ -528,6 +548,36 @@
     return '<div class="field"><input id="' + id + '" readonly value="' + esc(value) + '"><button type="button" data-copy="' + id + '">' + t('copy') + '</button></div>';
   }
 
+  // ── History: closed changesets from GET /api/history/ ──────────────────
+  var hist = { items: [], loaded: false, loading: false, more: false, error: false };
+  function ago(iso) {
+    var sec = Math.round((new Date(iso) - Date.now()) / 1000), abs = Math.abs(sec);
+    var units = [['day', 86400], ['hour', 3600], ['minute', 60]];
+    var fmt = new Intl.RelativeTimeFormat(I18N.get(), { numeric: 'auto' });
+    for (var i = 0; i < units.length; i++) if (abs >= units[i][1]) return fmt.format(Math.round(sec / units[i][1]), units[i][0]);
+    return fmt.format(0, 'minute');
+  }
+  function loadHistory() {
+    hist.loading = true; hist.error = false;
+    fetch('/api/history/?limit=15&offset=' + hist.items.length)
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) { hist.items = hist.items.concat(d.results); hist.more = d.has_more; hist.loaded = true; })
+      .catch(function () { hist.error = true; hist.loaded = true; })
+      .then(function () { hist.loading = false; if (current === 'history') render(); });
+  }
+  sideBody.addEventListener('click', function (e) {
+    var show = e.target.closest('[data-hist-show]');
+    if (show) {
+      var c = hist.items.filter(function (x) { return String(x.id) === show.dataset.histShow; })[0];
+      if (c && c.bbox) {
+        var b = c.bbox;
+        map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 90, maxZoom: 18, duration: 900 });
+      }
+      return;
+    }
+    if (e.target.closest('[data-hist-more]')) loadHistory();
+  });
+
   var PANELS = {
     welcome: function () {
       return { title: t('welcomeTitle'), html:
@@ -535,7 +585,23 @@
         '<div class="btn-row"><button class="btn" data-panel="about" type="button">' + t('learnMore') + '</button>' +
         '<a class="btn primary" href="' + editLink.getAttribute('href') + '">' + t('startMapping') + '</a></div>' };
     },
-    history: function () { return soon('history'); },
+    history: function () {
+      if (!hist.loaded && !hist.loading) loadHistory();
+      var html = '<p class="muted">' + esc(t('h_intro')) + '</p>';
+      html += hist.items.map(function (c) {
+        var counts = [['h_created', c.created], ['h_modified', c.modified], ['h_deleted', c.deleted]].filter(function (x) { return x[1]; })
+          .map(function (x) { return '<span class="chip">' + x[1] + ' ' + esc(t(x[0])) + '</span>'; }).join('');
+        return '<article class="cs"><h4>' + (c.comment ? esc(c.comment) : '<i>' + esc(t('h_nocomment')) + '</i>') + '</h4>' +
+          '<div class="meta">' + esc(t('h_by')) + ' <b>' + esc(c.user) + '</b> · ' + esc(ago(c.closed_at || c.created_at)) + ' · #' + c.id + '</div>' +
+          '<div class="chips">' + counts + '</div>' +
+          (c.bbox ? '<button type="button" class="btn" data-hist-show="' + c.id + '">' + esc(t('h_show')) + '</button>' : '') + '</article>';
+      }).join('');
+      if (hist.error) html += '<p>' + esc(t('h_error')) + '</p>';
+      else if (hist.loaded && !hist.items.length) html += '<p>' + esc(t('h_empty')) + '</p>';
+      if (hist.loading) html += '<p class="muted">' + esc(t('h_loading')) + '</p>';
+      else if (hist.more) html += '<div class="btn-row"><button type="button" class="btn" data-hist-more="1">' + esc(t('h_more')) + '</button></div>';
+      return { title: t('history'), html: html };
+    },
     traces: function () { return soon('traces'); },
     diaries: function () { return soon('diaries'); },
     communities: function () { return soon('communities'); },
@@ -588,9 +654,26 @@
         '<div class="btn-row"><a class="btn primary" href="' + editLink.getAttribute('href') + '">' + t('editThis') + '</a></div>' };
     },
     object: function (arg) {
-      var ll = arg.lngLat;
-      return { title: t('object'), html: featureHtml(arg.f) + '<dl class="kv"><dt>' + t('coords') + '</dt><dd>' + ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6) + '</dd></dl>' +
-        '<div class="btn-row"><a class="btn primary" href="/edit/#map=19/' + ll.lat.toFixed(6) + '/' + ll.lng.toFixed(6) + '">' + t('editThis') + '</a></div>' };
+      var ll = arg.lngLat, d = arg.detail, ids = '';
+      var row = function (k, v) { return v ? '<dt>' + t(k) + '</dt><dd>' + esc(v) + '</dd>' : ''; };
+      var human = function (v) { v = String(v).replace(/_/g, ' '); return v.charAt(0).toUpperCase() + v.slice(1); };
+      var html, title = t('object');
+      if (d) {
+        title = d.name || human(d.category || d.kind);
+        var rows = row('d_type', d.category ? human(d.category) : '') + row('d_en', d.name_en && d.name_en !== d.name ? d.name_en : '') + row('d_address', d.address) +
+          row('d_levels', d.attrs.levels) + row('d_area', d.attrs.area_m2 ? d.attrs.area_m2 + ' m²' : '');
+        ['ref', 'oneway', 'maxspeed', 'lanes', 'width', 'surface', 'bridge', 'tunnel'].forEach(function (k) {
+          if (d.attrs[k]) rows += row('a_' + k, d.attrs[k] === 'yes' ? t('a_yes') : human(d.attrs[k]));
+        });
+        rows += row('d_region', d.place.region) + row('d_district', d.place.district) + row('d_area8', d.place.area);
+        html = '<dl class="kv">' + rows + '</dl>';
+        ids = d.osm_id ? d.osm_type.charAt(0) + d.osm_id : '';
+      } else {
+        html = featureHtml(arg.f) + (arg.loading ? '<p class="muted">' + esc(t('d_loading')) + '</p>' : '');
+      }
+      return { title: title, html: html + '<dl class="kv"><dt>' + t('coords') + '</dt><dd>' + ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6) + '</dd></dl>' +
+        '<div class="btn-row"><a class="btn primary" href="/edit/#map=19/' + ll.lat.toFixed(6) + '/' + ll.lng.toFixed(6) + (ids ? '&id=' + ids : '') + '">' + t('editThis') + '</a>' +
+        (d && d.osm_id ? '<a class="btn" target="_blank" rel="noopener" href="https://www.openstreetmap.org/' + esc(d.osm_type) + '/' + d.osm_id + '">' + t('d_osm') + '</a>' : '') + '</div>' };
     }
   };
 
@@ -680,14 +763,67 @@
     }, function () { toast(t('geoDenied')); });
   };
 
-  // ── Search (coordinates for now) ────────────────────────────────────────
+  // ── Search: coordinates, or places from the database (GET /api/search/) ──────────
   var form = document.getElementById('search'), q = document.getElementById('q');
+  var coordRe = /^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/;
+  var box = document.createElement('ul'), results = [], active = -1, searchSeq = 0, searchTimer;
+  box.id = 'suggest'; box.hidden = true; box.setAttribute('role', 'listbox'); form.appendChild(box);
+  var POINT_ZOOM = { place: 12, hood: 15, street: 16 };
+
+  function hideSuggest() { box.hidden = true; active = -1; }
+  function renderSuggest() {
+    box.innerHTML = results.map(function (r, i) {
+      var sub = [t('k_' + r.kind), r.subtitle].filter(Boolean).join(' · ');
+      return '<li role="option" data-i="' + i + '"' + (i === active ? ' class="on"' : '') + '><b>' + esc(r.name) + '</b><span>' + esc(sub) + '</span></li>';
+    }).join('');
+    box.hidden = !results.length;
+  }
+  function pick(r) {
+    hideSuggest(); q.value = r.name; q.blur();
+    var b = r.bbox;
+    if (b && (b[2] - b[0] > 1e-5 || b[3] - b[1] > 1e-5)) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 80, maxZoom: 18, duration: 900 });
+    else map.flyTo({ center: [r.lon, r.lat], zoom: POINT_ZOOM[r.kind] || 17 });
+    setMarker(r.lon, r.lat);
+  }
+  function runSearch(text, done) {
+    var c = map.getCenter(), seq = ++searchSeq;
+    fetch('/api/search/?q=' + encodeURIComponent(text) + '&lon=' + c.lng.toFixed(4) + '&lat=' + c.lat.toFixed(4))
+      .then(function (r) { return r.ok ? r.json() : { results: [] }; })
+      .catch(function () { return { results: [] }; })
+      .then(function (d) { if (seq === searchSeq) done(d.results || []); });
+  }
+  q.addEventListener('input', function () {
+    clearTimeout(searchTimer);
+    var text = q.value.trim();
+    if (text.length < 3 || coordRe.test(text)) { searchSeq++; results = []; hideSuggest(); return; }
+    searchTimer = setTimeout(function () { runSearch(text, function (list) { results = list; active = -1; renderSuggest(); }); }, 250);
+  });
+  q.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { hideSuggest(); return; }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && results.length) {
+      e.preventDefault(); box.hidden = false;
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length;
+      renderSuggest();
+    }
+  });
+  box.addEventListener('mousedown', function (e) {   // mousedown: fires before the input loses focus
+    var li = e.target.closest('li'); if (!li) return;
+    e.preventDefault(); pick(results[+li.dataset.i]);
+  });
+  q.addEventListener('blur', function () { setTimeout(hideSuggest, 120); });
+  q.addEventListener('focus', function () { if (results.length) renderSuggest(); });
   form.onsubmit = function (e) {
     e.preventDefault();
-    var m = /^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/.exec(q.value);
+    var text = q.value.trim(), m = coordRe.exec(text);
     if (m && Math.abs(+m[1]) <= 90 && Math.abs(+m[2]) <= 180) {
+      hideSuggest();
       map.flyTo({ center: [+m[2], +m[1]], zoom: 17 });
       setMarker(+m[2], +m[1]);
+    } else if (active >= 0 && results[active]) {
+      pick(results[active]);
+    } else if (text.length >= 3) {
+      clearTimeout(searchTimer);
+      runSearch(text, function (list) { if (list.length) pick(list[0]); else toast(t('searchNothing')); });
     } else {
       toast(t('searchNothing'));
     }
