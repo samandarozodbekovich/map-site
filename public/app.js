@@ -564,6 +564,13 @@
 
   // ── Side panels ─────────────────────────────────────────────────────────
   var sidebar = document.getElementById('sidebar');
+  // Space the side panel takes away from the map: a column on the left on desktops, a bottom sheet (55% of the height) on phones.
+  // fitBounds uses it so a route / quarter is never hidden behind the panel.
+  function mapPadding() {
+    var open = !sidebar.hidden;
+    if (window.innerWidth <= 640) return { top: 150, bottom: open ? Math.round(window.innerHeight * 0.55) + 30 : 60, left: 30, right: 70 };
+    return { top: 90, bottom: 60, left: open ? 400 : 60, right: 70 };
+  }
   var sideTitle = document.getElementById('side-title');
   var sideBody = document.getElementById('side-body');
   var current = null, currentArg = null;
@@ -600,7 +607,7 @@
       var c = hist.items.filter(function (x) { return String(x.id) === show.dataset.histShow; })[0];
       if (c && c.bbox) {
         var b = c.bbox;
-        map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 90, maxZoom: 18, duration: 900 });
+        map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: mapPadding(), maxZoom: 18, duration: 900 });
       }
       return;
     }
@@ -754,7 +761,7 @@
         ensureRouteLayers(); map.getSource('route').setData(rt.geometry);
         var first = rt.geometry.coordinates[0];
         var b = rt.geometry.coordinates.reduce(function (bb, c) { return bb.extend(c); }, new maplibregl.LngLatBounds(first, first));
-        map.fitBounds(b, { padding: { top: 90, bottom: 60, left: 400, right: 70 }, maxZoom: 16, duration: 900 });
+        map.fitBounds(b, { padding: mapPadding(), maxZoom: 16, duration: 900 });
       })
       .catch(function () { if (seq === dirs.seq) { dirs.route = null; dirs.error = 'd_routeErr'; } })
       .then(function () { if (seq === dirs.seq) { dirs.busy = false; renderRoute(); } });
@@ -1093,6 +1100,7 @@
   }
   function openPanel(name, arg) {
     if (current === name && name !== 'object' && !arg) { closePanel(); return; } // toggle
+    hideSuggest();
     current = name; currentArg = arg || null;
     render();
   }
@@ -1186,7 +1194,7 @@
   function pick(r) {
     hideSuggest(); q.value = r.name; q.blur();
     var b = r.bbox;
-    if (b && (b[2] - b[0] > 1e-5 || b[3] - b[1] > 1e-5)) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 80, maxZoom: 18, duration: 900 });
+    if (b && (b[2] - b[0] > 1e-5 || b[3] - b[1] > 1e-5)) map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: mapPadding(), maxZoom: 18, duration: 900 });
     else map.flyTo({ center: [r.lon, r.lat], zoom: POINT_ZOOM[r.kind] || 17 });
     setMarker(r.lon, r.lat);
   }
