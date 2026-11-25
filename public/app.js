@@ -113,7 +113,7 @@
 
   var state = {
     theme: store.get('theme', 'standard'),
-    ov: { buildings: true, poi: true, boundaries: true, labels: true, transit: true }
+    ov: { buildings: true, poi: true, boundaries: true, labels: true, transit: true, notes: false }
   };
   if (!THEMES[state.theme]) state.theme = 'standard';
   try { var sv = JSON.parse(store.get('overlays', '')); if (sv) Object.keys(state.ov).forEach(function (k) { if (typeof sv[k] === 'boolean') state.ov[k] = sv[k]; }); } catch (e) {}
@@ -548,6 +548,11 @@
       });
   }
   map.on('click', function (e) {
+    if (notes.placing) { notes.placing = false; map.getCanvas().style.cursor = ''; startDraft(e.lngLat); return; }
+    if (map.getLayer('notes-circle') && state.ov.notes) {
+      var hit = map.queryRenderedFeatures([[e.point.x - 7, e.point.y - 7], [e.point.x + 7, e.point.y + 7]], { layers: ['notes-circle'] });
+      if (hit.length) { openNote(hit[0].properties.id); return; }
+    }
     if (dirs.picking) { var k = dirs.picking; dirs.picking = null; setPoint(k, e.lngLat.lng, e.lngLat.lat); return; }
     var f = featureAt(e.point, 5);
     if (!f) return;
@@ -814,6 +819,152 @@
     if (to) { var d = JSON.parse(to.dataset.dirTo); openPanel('directions'); setPoint('to', d.lon, d.lat, d.label); }
   });
 
+  // ── Map notes: "something is wrong here" (GET/POST /api/notes/) ──────────────
+  var account = null;   // the logged-in user, filled in by the account chip at the bottom of this file
+  var notes = { list: [], mode: 'intro', draft: null, draftText: '', commentText: '', detail: null, busy: false, error: '', placing: false };
+  var draftMarker = null, notesTimer;
+
+  function csrfToken() { var m = document.cookie.match(/(?:^|; )csrftoken=([^;]*)/); return m ? decodeURIComponent(m[1]) : ''; }
+  function notesApi(method, path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (method !== 'GET') headers['X-CSRFToken'] = csrfToken();
+    return fetch('/api/notes/' + path, { method: method, credentials: 'same-origin', headers: headers, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }, function () { return { status: r.status, body: {} }; }); })
+      .catch(function () { return { status: 0, body: {} }; });
+  }
+  var NOTE_ERRORS = { login_required: 'n_login', text_too_short: 'n_short', text_too_long: 'n_long', out_of_area: 'n_far', too_many_requests: 'n_rate', rate_limited: 'n_rate', note_closed: 'n_closedErr', note_open: 'n_openErr' };
+  function noteError(res) { return NOTE_ERRORS[res.body && res.body.error] || (res.status === 404 ? 'n_gone' : 'n_error'); }
+
+  function notesGeo() {
+    return { type: 'FeatureCollection', features: notes.list.map(function (n) {
+      return { type: 'Feature', properties: { id: n.id, status: n.status }, geometry: { type: 'Point', coordinates: [n.lon, n.lat] } };
+    }) };
+  }
+  function ensureNoteLayers() {
+    var vis = state.ov.notes ? 'visible' : 'none';
+    if (!map.getSource('notes')) map.addSource('notes', { type: 'geojson', data: notesGeo() });
+    if (!map.getLayer('notes-circle')) map.addLayer({ id: 'notes-circle', type: 'circle', source: 'notes', layout: { visibility: vis },
+      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 17, 10], 'circle-color': ['match', ['get', 'status'], 'closed', '#16a34a', '#e11d48'],
+        'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } });
+    if (!map.getLayer('notes-text')) map.addLayer({ id: 'notes-text', type: 'symbol', source: 'notes', filter: ['==', ['get', 'status'], 'open'],
+      layout: { visibility: vis, 'text-field': '!', 'text-font': FONT, 'text-size': 12, 'text-allow-overlap': true, 'text-ignore-placement': true }, paint: { 'text-color': '#ffffff' } });
+  }
+  function refreshNotes() { ensureNoteLayers(); map.getSource('notes').setData(notesGeo()); }
+  function loadNotes() {
+    clearTimeout(notesTimer);
+    if (!state.ov.notes || map.getZoom() < 10) { if (notes.list.length) { notes.list = []; refreshNotes(); } return; }
+    notesTimer = setTimeout(function () {
+      var c = map.getCenter(), b = map.getBounds();
+      var hw = Math.min((b.getEast() - b.getWest()) / 2, 1), hh = Math.min((b.getNorth() - b.getSouth()) / 2, 1);   // the server accepts at most 2 degrees
+      var box = [c.lng - hw, c.lat - hh, c.lng + hw, c.lat + hh].map(function (v) { return v.toFixed(5); }).join(',');
+      notesApi('GET', '?bbox=' + box).then(function (res) { if (res.status === 200) { notes.list = res.body.notes; refreshNotes(); } });
+    }, 300);
+  }
+  function setNotesOn(on) {
+    state.ov.notes = on; store.set('overlays', JSON.stringify(state.ov));
+    ensureNoteLayers();
+    ['notes-circle', 'notes-text'].forEach(function (id) { map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); });
+    loadNotes();
+  }
+  map.on('moveend', loadNotes);
+  // setStyle() (theme / overlay switch) wipes our layers: put them back and refill them
+  map.on('styledata', function () { if (!map.getSource('notes') && map.isStyleLoaded()) { ensureNoteLayers(); loadNotes(); } });
+
+  function dropDraft() { if (draftMarker) { draftMarker.remove(); draftMarker = null; } notes.draft = null; notes.placing = false; map.getCanvas().style.cursor = ''; }
+  function startDraft(ll) {
+    dropDraft();
+    notes.mode = 'draft'; notes.draft = { lon: ll.lng, lat: ll.lat }; notes.draftText = ''; notes.error = '';
+    draftMarker = new maplibregl.Marker({ element: pinEl(), anchor: 'bottom', draggable: true }).setLngLat([ll.lng, ll.lat]).addTo(map);
+    draftMarker.on('dragend', function () {
+      var p = draftMarker.getLngLat(); notes.draft = { lon: p.lng, lat: p.lat };
+      var c = el('note-coords'); if (c) c.textContent = p.lat.toFixed(6) + ', ' + p.lng.toFixed(6);
+    });
+    openPanel('note', { draft: true });
+  }
+  function openNote(id) {
+    dropDraft();
+    notes.mode = 'detail'; notes.detail = null; notes.error = ''; notes.commentText = ''; notes.busy = true;
+    openPanel('note', { id: id });
+    notesApi('GET', id + '/').then(function (res) {
+      notes.busy = false;
+      if (res.status === 200) notes.detail = res.body; else notes.error = noteError(res);
+      if (current === 'note') render();
+    });
+  }
+  function sendDraft() {
+    var text = (el('note-text') || {}).value || notes.draftText;
+    if (notes.busy || !notes.draft) return;
+    notes.busy = true; notes.error = ''; render();
+    notesApi('POST', '', { lat: notes.draft.lat, lon: notes.draft.lon, text: text }).then(function (res) {
+      notes.busy = false;
+      if (res.status === 201) { dropDraft(); loadNotes(); openNote(res.body.id); return; }
+      notes.error = noteError(res); notes.draftText = text; render();
+    });
+  }
+  function noteAction(action) {
+    var d = notes.detail; if (!d || notes.busy) return;
+    var field = el('note-text'), text = field ? field.value : notes.commentText;
+    notes.busy = true; notes.error = ''; render();
+    notesApi('POST', d.id + '/' + action + '/', { text: text }).then(function (res) {
+      notes.busy = false;
+      if (res.status === 200) { notes.detail = res.body; notes.commentText = ''; loadNotes(); } else { notes.error = noteError(res); notes.commentText = text; }
+      render();
+    });
+  }
+  sideBody.addEventListener('input', function (e) {
+    if (e.target.id !== 'note-text') return;
+    if (notes.mode === 'draft') notes.draftText = e.target.value; else notes.commentText = e.target.value;
+  });
+  sideBody.addEventListener('change', function (e) { if (e.target.matches('[data-note-layer]')) { setNotesOn(e.target.checked); render(); } });
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('[data-note-add]')) {
+      if (!account) { notes.mode = 'intro'; notes.error = 'n_login'; render(); return; }
+      notes.error = ''; notes.placing = true; if (!state.ov.notes) setNotesOn(true);
+      map.getCanvas().style.cursor = 'crosshair'; toast(t('n_place')); render(); return;
+    }
+    if (e.target.closest('[data-note-send]')) { sendDraft(); return; }
+    if (e.target.closest('[data-note-cancel]')) { dropDraft(); notes.mode = 'intro'; notes.error = ''; render(); return; }
+    if (e.target.closest('[data-note-back]')) { notes.mode = 'intro'; notes.error = ''; render(); return; }
+    if (e.target.closest('[data-note-comment]')) { noteAction('comment'); return; }
+    if (e.target.closest('[data-note-close]')) { noteAction('close'); return; }
+    if (e.target.closest('[data-note-reopen]')) { noteAction('reopen'); }
+  });
+
+  function noteEntries(d) {
+    return d.comments.map(function (c) {
+      return '<article class="note-entry"><div class="meta"><b>' + esc(c.user || '—') + '</b> ' + esc(t('n_a_' + c.action)) + ' · ' + esc(ago(c.created_at)) + '</div>' +
+        (c.text ? '<p>' + esc(c.text) + '</p>' : '') + '</article>';
+    }).join('');
+  }
+  function notePanel() {
+    var err = notes.error ? '<p class="note-error">' + esc(t(notes.error)) + '</p>' : '', busy = notes.busy ? ' disabled' : '';
+    var loginHint = '<p class="muted">' + esc(t('n_login')) + ' <a href="/login?next=' + encodeURIComponent(location.pathname + location.search + location.hash) + '">' + esc(t('login')) + '</a></p>';
+    if (notes.mode === 'draft' && notes.draft) {
+      return { title: t('noteTitle'), html: '<p class="muted">' + esc(t('n_draftHint')) + '</p><dl class="kv"><dt>' + t('coords') + '</dt><dd id="note-coords">' +
+        notes.draft.lat.toFixed(6) + ', ' + notes.draft.lon.toFixed(6) + '</dd></dl>' +
+        '<textarea id="note-text" class="note-box" rows="5" maxlength="2000" placeholder="' + esc(t('n_textPh')) + '">' + esc(notes.draftText) + '</textarea>' + err +
+        '<div class="btn-row"><button type="button" class="btn primary" data-note-send="1"' + busy + '>' + esc(t('n_send')) + '</button>' +
+        '<button type="button" class="btn" data-note-cancel="1">' + esc(t('n_cancel')) + '</button></div>' };
+    }
+    if (notes.mode === 'detail') {
+      var d = notes.detail, html = '<div class="btn-row" style="margin-top:0"><button type="button" class="btn" data-note-back="1">&larr; ' + esc(t('noteTitle')) + '</button></div>';
+      if (!d) return { title: t('noteTitle'), html: html + (notes.busy ? '<p class="muted">' + esc(t('n_loading')) + '</p>' : err) };
+      var open = d.status === 'open';
+      html += '<p><span class="state ' + (open ? 'off' : 'on') + '">' + esc(t(open ? 'n_open' : 'n_closed')) + '</span> <span class="muted">#' + d.id + ' · ' + d.lat.toFixed(5) + ', ' + d.lon.toFixed(5) + '</span></p>' + noteEntries(d);
+      if (account) {
+        html += '<textarea id="note-text" class="note-box" rows="3" maxlength="2000" placeholder="' + esc(t('n_commentPh')) + '">' + esc(notes.commentText) + '</textarea>' + err + '<div class="btn-row">' +
+          (open ? '<button type="button" class="btn primary" data-note-comment="1"' + busy + '>' + esc(t('n_comment')) + '</button><button type="button" class="btn" data-note-close="1"' + busy + '>' + esc(t('n_resolve')) + '</button>'
+                : '<button type="button" class="btn primary" data-note-reopen="1"' + busy + '>' + esc(t('n_reopen')) + '</button>') + '</div>';
+      } else html += loginHint;
+      return { title: t('noteTitle'), html: html };
+    }
+    return { title: t('noteTitle'), html: '<p>' + esc(t('n_intro')) + '</p>' +
+      '<label class="check"><input type="checkbox" data-note-layer="1"' + (state.ov.notes ? ' checked' : '') + '>' + esc(t('n_layer')) + '</label>' + err +
+      (account ? '' : loginHint) +
+      '<div class="btn-row"><button type="button" class="btn primary" data-note-add="1">' + esc(notes.placing ? t('n_place') : t('n_add')) + '</button></div>' +
+      '<p class="muted">' + esc(t('n_fix')) + '</p>' };
+  }
+
   var PANELS = {
     welcome: function () {
       return { title: t('welcomeTitle'), html:
@@ -841,7 +992,7 @@
     traces: function () { return soon('traces'); },
     diaries: function () { return soon('diaries'); },
     communities: function () { return soon('communities'); },
-    note: function () { return simple('noteTitle', 'noteText'); },
+    note: notePanel,
     help: function () { return simple('helpTitle', 'helpText'); },
     about: function () { return simple('aboutTitle', 'aboutText'); },
     copyright: function () { return simple('copyrightTitle', 'copyrightText'); },
@@ -872,7 +1023,7 @@
       return { title: t('layers'), html:
         '<h3>' + t('baseMap') + '</h3><div class="choice">' +
         themeOpt('standard', 'linear-gradient(135deg,#f2efe9 55%,#aad3df 55%)') + themeOpt('light', 'linear-gradient(135deg,#f3f4f6 55%,#cfe2ee 55%)') + themeOpt('dark', 'linear-gradient(135deg,#10151b 55%,#17364a 55%)') + '</div>' +
-        '<h3>' + t('overlays') + '</h3>' + ck('buildings', 'ovBuildings') + ck('poi', 'ovPoi') + ck('boundaries', 'ovBoundaries') + ck('transit', 'ovTransit') + ck('labels', 'ovLabels') };
+        '<h3>' + t('overlays') + '</h3>' + ck('buildings', 'ovBuildings') + ck('poi', 'ovPoi') + ck('boundaries', 'ovBoundaries') + ck('transit', 'ovTransit') + ck('notes', 'ovNotes') + ck('labels', 'ovLabels') };
     },
     legend: function () {
       var c = THEMES[state.theme];
@@ -947,6 +1098,8 @@
   }
   function closePanel() {
     current = null; currentArg = null; sidebar.hidden = true; markActive(null);
+    if (notes.mode === 'draft') notes.mode = 'intro';
+    dropDraft();
     store.set('welcomed', '1');
   }
   document.getElementById('side-close').onclick = closePanel;
@@ -1101,6 +1254,7 @@
     };
     fetch('/api/auth/me/', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
       if (!d.authenticated) return;
+      account = d.user;
       guest.hidden = true; box.hidden = false;
       document.getElementById('user-name').textContent = d.user.display_name;
       document.getElementById('user-initial').textContent = (d.user.display_name || '?').charAt(0).toUpperCase();

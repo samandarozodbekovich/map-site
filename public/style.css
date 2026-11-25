@@ -216,3 +216,8 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 .state.on { background: rgba(34, 197, 94, .18); color: #16a34a; }
 .state.off { background: rgba(220, 38, 38, .15); color: #dc2626; }
 .kv a { color: #2563eb; word-break: break-all; }
+.note-box { width: 100%; box-sizing: border-box; margin: 8px 0 0; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--card-line); background: rgba(127, 127, 127, .08); color: inherit; font: inherit; resize: vertical; }
+.note-error { color: #dc2626; margin: 6px 0 0; font-size: 13px; }
+.note-entry { padding: 8px 0; border-top: 1px solid var(--card-line); }
+.note-entry .meta { font-size: 12.5px; color: var(--card-muted); }
+.note-entry p { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; }
