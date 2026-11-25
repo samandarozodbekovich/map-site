@@ -548,6 +548,7 @@
       });
   }
   map.on('click', function (e) {
+    if (viaJustDragged) return;
     if (notes.placing) { notes.placing = false; map.getCanvas().style.cursor = ''; startDraft(e.lngLat); return; }
     if (map.getLayer('notes-circle') && state.ov.notes) {
       var hit = map.queryRenderedFeatures([[e.point.x - 7, e.point.y - 7], [e.point.x + 7, e.point.y + 7]], { layers: ['notes-circle'] });
@@ -691,7 +692,8 @@
   }
 
   // ── Directions: OSRM through /route/ (car) ───────────────────────────────
-  var dirs = { from: null, to: null, picking: null, route: null, busy: false, error: '', seq: 0 };
+  var dirs = { from: null, to: null, via: [], picking: null, route: null, busy: false, error: '', seq: 0 };
+  var MAX_VIA = 5, viaMarkers = [], viaDrag = null, viaGhost = null, viaJustDragged = false;
   var dirMarkers = {};
   var EMPTY_FC = { type: 'FeatureCollection', features: [] };
   function el(id) { return document.getElementById(id); }
@@ -699,10 +701,48 @@
   function ensureRouteLayers() {
     if (!map.getSource('route')) map.addSource('route', { type: 'geojson', data: dirs.route ? dirs.route.geometry : EMPTY_FC });
     if (!map.getLayer('route-casing')) map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 } });
+    // invisible fat copy of the line: a finger or a mouse can grab it without aiming at 5 pixels
+    if (!map.getLayer('route-hit')) map.addLayer({ id: 'route-hit', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000000', 'line-width': 22, 'line-opacity': 0 } });
     if (!map.getLayer('route-line')) map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2563eb', 'line-width': 5 } });
   }
   // setStyle() (theme / overlay switch) wipes our layers: put them back
   map.on('styledata', function () { if (dirs.route && !map.getSource('route') && map.isStyleLoaded()) ensureRouteLayers(); });
+
+  // Press the route line, move, release: a via point is added where you let go (the leg you grabbed decides its place in the order)
+  function legAt(ll) {
+    var best = 0, bestD = Infinity;
+    dirs.route.legs.forEach(function (pts, i) {
+      for (var k = 0; k < pts.length; k++) { var dx = pts[k][0] - ll.lng, dy = pts[k][1] - ll.lat, d = dx * dx + dy * dy; if (d < bestD) { bestD = d; best = i; } }
+    });
+    return best;
+  }
+  function startViaDrag(e) {
+    if (!dirs.route || dirs.via.length >= MAX_VIA || notes.placing || dirs.picking) return;
+    var t0 = e.originalEvent && e.originalEvent.target;
+    if (t0 && t0.closest && t0.closest('.maplibregl-marker')) return;   // the press is on a marker (A, B, a via point): that marker handles its own drag
+    e.preventDefault();                                    // no map panning while the line is being dragged
+    viaDrag = { leg: legAt(e.lngLat), from: e.point, last: e.point };
+    viaGhost = new maplibregl.Marker({ element: viaDot() }).setLngLat(e.lngLat).addTo(map);
+    map.getCanvas().style.cursor = 'grabbing';
+  }
+  function moveViaDrag(e) { if (viaDrag) { viaGhost.setLngLat(e.lngLat); viaDrag.last = e.point; } }
+  function endViaDrag() {
+    if (!viaDrag) return;
+    var ll = viaGhost.getLngLat(), d = viaDrag, moved = Math.hypot(d.last.x - d.from.x, d.last.y - d.from.y) > 6;
+    viaGhost.remove(); viaGhost = null; viaDrag = null; map.getCanvas().style.cursor = '';
+    viaJustDragged = true; setTimeout(function () { viaJustDragged = false; }, 300);   // the release also sends a map click: ignore it
+    if (!moved) return;
+    dirs.via.splice(d.leg, 0, { lon: ll.lng, lat: ll.lat });
+    drawViaMarkers(); calcRoute(true);
+  }
+  map.on('mousedown', 'route-hit', startViaDrag);
+  map.on('touchstart', 'route-hit', startViaDrag);
+  map.on('mousemove', moveViaDrag);
+  map.on('touchmove', moveViaDrag);
+  map.on('mouseup', endViaDrag);
+  map.on('touchend', endViaDrag);
+  map.on('mouseenter', 'route-hit', function () { if (!viaDrag) map.getCanvas().style.cursor = 'grab'; });
+  map.on('mouseleave', 'route-hit', function () { if (!viaDrag) map.getCanvas().style.cursor = ''; });
 
   function pinDot(letter, cls) { var d = document.createElement('div'); d.className = 'rt-pin ' + cls; d.textContent = letter; return d; }
   function drawMarkers() {
@@ -716,6 +756,23 @@
       m.setLngLat([pt.lon, pt.lat]).addTo(map);
     });
   }
+  function viaDot() { var d = document.createElement('div'); d.className = 'rt-via'; d.title = t('d_viaRemove'); return d; }
+  function drawViaMarkers() {
+    viaMarkers.forEach(function (m) { m.remove(); });
+    viaMarkers = dirs.via.map(function (v, i) {
+      var el2 = viaDot(), m = new maplibregl.Marker({ element: el2, draggable: true }).setLngLat([v.lon, v.lat]).addTo(map);
+      m.on('dragend', function () { var ll = m.getLngLat(); dirs.via[i] = { lon: ll.lng, lat: ll.lat }; calcRoute(true); });   // moved: new route, same view
+      // a tap (pressed and released in place, without dragging) removes it; 'click' is not reliable on a draggable marker
+      var down = null, dragged = false;
+      m.on('dragstart', function () { dragged = true; });
+      el2.addEventListener('pointerdown', function (ev) { down = { x: ev.clientX, y: ev.clientY }; dragged = false; });
+      el2.addEventListener('pointerup', function (ev) {
+        var tap = down && !dragged && Math.hypot(ev.clientX - down.x, ev.clientY - down.y) < 5; down = null;
+        if (tap) { dirs.via.splice(i, 1); drawViaMarkers(); calcRoute(true); }
+      });
+      return m;
+    });
+  }
   function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 0 : 1) + ' ' + t('d_km') : (Math.round(m / 10) * 10) + ' ' + t('d_m'); }
   function fmtTime(sec) {
     var min = Math.max(1, Math.round(sec / 60));
@@ -725,6 +782,7 @@
   function stepText(st) {
     var m = st.maneuver || {}, name = st.name || '', text;
     if (m.type === 'depart') text = t('r_depart');
+    else if (m.type === 'via') text = t('r_via');
     else if (m.type === 'arrive') text = t('r_arrive');
     else if (m.type === 'roundabout' || m.type === 'rotary' || m.type === 'roundabout turn') text = m.exit ? t('r_roundabout').replace('{n}', m.exit) : t('r_roundabout0');
     else text = t(TURN_KEY[m.modifier] || 'r_continue');
@@ -738,6 +796,7 @@
     if (!dirs.route) { box.innerHTML = '<p class="muted">' + esc(t('d_dirHint')) + '</p>'; return; }
     var r = dirs.route;
     box.innerHTML = '<div class="rt-sum"><b>' + esc(fmtTime(r.duration)) + '</b><span>' + esc(fmtDist(r.distance)) + ' · ' + esc(t('d_car')) + '</span></div>' +
+      '<p class="muted">' + esc(t('d_viaHint')) + '</p>' +
       '<ol class="rt-steps">' + r.steps.map(function (st) {
         return '<li><span>' + esc(stepText(st)) + '</span><em>' + (st.distance >= 10 ? esc(fmtDist(st.distance)) : '') + '</em></li>';
       }).join('') + '</ol>';
@@ -746,22 +805,32 @@
     dirs.route = null; dirs.error = ''; dirs.seq++; dirs.busy = false;
     var src = map.getSource('route'); if (src) src.setData(EMPTY_FC);
   }
-  function calcRoute() {
+  function calcRoute(keepView) {
     if (!dirs.from || !dirs.to) { clearRoute(); renderRoute(); return; }
     var seq = ++dirs.seq; dirs.busy = true; dirs.error = ''; renderRoute();
-    var url = '/route/route/v1/driving/' + dirs.from.lon.toFixed(6) + ',' + dirs.from.lat.toFixed(6) + ';' + dirs.to.lon.toFixed(6) + ',' + dirs.to.lat.toFixed(6) +
-      '?overview=full&geometries=geojson&steps=true';
+    var pts = [dirs.from].concat(dirs.via, [dirs.to]).map(function (p) { return p.lon.toFixed(6) + ',' + p.lat.toFixed(6); }).join(';');
+    var url = '/route/route/v1/driving/' + pts + '?overview=full&geometries=geojson&steps=true';
     fetch(url).then(function (r) { return r.json(); })
       .then(function (body) {
         if (seq !== dirs.seq) return;
         var rt = body && body.routes && body.routes[0];
         if (!rt) { dirs.route = null; dirs.error = 'd_noRoute'; return; }
-        dirs.route = { geometry: rt.geometry, distance: rt.distance, duration: rt.duration,
-          steps: [].concat.apply([], rt.legs.map(function (l) { return l.steps; })) };
+        var steps = [];
+        rt.legs.forEach(function (leg, i) {
+          leg.steps.forEach(function (st, j) {
+            if (i > 0 && j === 0) return;                                                              // the "depart" of a later leg is the via point itself
+            if (i < rt.legs.length - 1 && j === leg.steps.length - 1) st = Object.assign({}, st, { maneuver: Object.assign({}, st.maneuver, { type: 'via' }) });
+            steps.push(st);
+          });
+        });
+        dirs.route = { geometry: rt.geometry, distance: rt.distance, duration: rt.duration, steps: steps,
+          legs: rt.legs.map(function (l) { return [].concat.apply([], l.steps.map(function (st) { return st.geometry.coordinates; })); }) };   // points of every leg, to tell which one a drag starts on
         ensureRouteLayers(); map.getSource('route').setData(rt.geometry);
-        var first = rt.geometry.coordinates[0];
-        var b = rt.geometry.coordinates.reduce(function (bb, c) { return bb.extend(c); }, new maplibregl.LngLatBounds(first, first));
-        map.fitBounds(b, { padding: mapPadding(), maxZoom: 16, duration: 900 });
+        if (!keepView) {
+          var first = rt.geometry.coordinates[0];
+          var b = rt.geometry.coordinates.reduce(function (bb, c) { return bb.extend(c); }, new maplibregl.LngLatBounds(first, first));
+          map.fitBounds(b, { padding: mapPadding(), maxZoom: 16, duration: 900 });
+        }
       })
       .catch(function () { if (seq === dirs.seq) { dirs.route = null; dirs.error = 'd_routeErr'; } })
       .then(function () { if (seq === dirs.seq) { dirs.busy = false; renderRoute(); } });
@@ -813,12 +882,12 @@
       return;
     }
     if (e.target.closest('[data-dir-swap]')) {
-      var a = dirs.from; dirs.from = dirs.to; dirs.to = a;
+      var a = dirs.from; dirs.from = dirs.to; dirs.to = a; dirs.via.reverse(); drawViaMarkers();
       ['from', 'to'].forEach(function (k) { var inp = el('dir-' + k); if (inp) inp.value = dirs[k] ? dirs[k].label : ''; });
       drawMarkers(); calcRoute(); return;
     }
     if (e.target.closest('[data-dir-clear]')) {
-      dirs.from = dirs.to = dirs.picking = null; clearRoute(); drawMarkers();
+      dirs.from = dirs.to = dirs.picking = null; dirs.via = []; drawViaMarkers(); clearRoute(); drawMarkers();
       ['from', 'to'].forEach(function (k) { var inp = el('dir-' + k); if (inp) inp.value = ''; });
       renderRoute(); return;
     }

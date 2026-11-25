@@ -226,3 +226,5 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 @media (max-width: 640px) {
   #search input, .dir-row input, .note-box, #sidebar input[type="text"], #sidebar textarea, .field input { font-size: 16px; }
 }
+.rt-via { width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 3px solid #2563eb; box-shadow: 0 1px 5px rgba(0, 0, 0, .4); cursor: grab; touch-action: none; }
+.rt-via:active { cursor: grabbing; }
