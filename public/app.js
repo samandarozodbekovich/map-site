@@ -113,7 +113,7 @@
 
   var state = {
     theme: store.get('theme', 'standard'),
-    ov: { buildings: true, poi: true, boundaries: true, labels: true }
+    ov: { buildings: true, poi: true, boundaries: true, labels: true, transit: true }
   };
   if (!THEMES[state.theme]) state.theme = 'standard';
   try { var sv = JSON.parse(store.get('overlays', '')); if (sv) Object.keys(state.ov).forEach(function (k) { if (typeof sv[k] === 'boolean') state.ov[k] = sv[k]; }); } catch (e) {}
@@ -222,10 +222,14 @@
     poiIconExpr.push('');
     var landuseFill = c.typed ? ['match', ['coalesce', ['get', 'landuse'], '']].concat(LANDUSE_COLORS, [c.landuse]) : c.landuse;
     var vegFill = c.typed ? ['match', ['coalesce', ['get', 'natural'], ['get', 'wood'], ['get', 'landuse'], '']].concat(VEG_COLORS, [c.veg]) : c.veg;
+    // Label text by interface language: uz = Latin (Cyrillic names transliterated by names.sql), en = name:en first, ru = original (mahallas: name_ru)
+    var NAMEX = { uz: ['coalesce', ['get', 'name_lat'], ['get', 'name'], ['get', 'name_en']],
+                  en: ['coalesce', ['get', 'name_en'], ['get', 'name_lat'], ['get', 'name']],
+                  ru: ['coalesce', ['get', 'name_ru'], ['get', 'name'], ['get', 'name_en']] }[I18N.get()] || ['get', 'name'];
     var label = function (id, layer, minzoom, extra) {
       var o = {
         id: id, type: 'symbol', source: 'base', 'source-layer': layer, minzoom: minzoom, filter: ['has', 'name'],
-        layout: Object.assign({ visibility: ov.labels ? 'visible' : 'none', 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 11, 'text-max-width': 8 }, extra.layout || {}),
+        layout: Object.assign({ visibility: ov.labels ? 'visible' : 'none', 'text-field': NAMEX, 'text-font': FONT, 'text-size': 11, 'text-max-width': 8 }, extra.layout || {}),
         paint: Object.assign({ 'text-color': c.text, 'text-halo-color': c.halo, 'text-halo-width': 1.4 }, extra.paint || {})
       };
       return o;
@@ -233,7 +237,7 @@
     // ── Overview layers (source "ovr" = Martin overview_tiles): big water + urban areas at small zoom,
     //    and labels that appear step by step: country → regions → districts, cities → towns → villages → hamlets
     var FONT_B = ['Noto Sans SemiBold'];
-    var nm = ['coalesce', ['get', 'name'], ['get', 'name_en']];
+    var nm = NAMEX;
     function zs(a) { return ['interpolate', ['linear'], ['zoom']].concat(a); }
     function ovLabel(id, layer, filter, minz, maxz, extra) {
       var o = {
@@ -284,13 +288,13 @@
     var roadClassIn = function (list) { return ['in', hw, ['literal', list]]; };
     var featureLayers = [
       { id: 'label-ovr-road', type: 'symbol', source: 'ovr', 'source-layer': 'road', minzoom: 10, maxzoom: 14, filter: ['all', roadClassIn(['motorway', 'trunk', 'primary']), ['any', ['has', 'ref'], ['has', 'name']]],
-        layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['coalesce', ['get', 'ref'], ['get', 'name']], 'text-font': FONT, 'text-size': 10, 'symbol-spacing': 320, 'text-max-angle': 30 }, lblVis), paint: Object.assign({}, haloText, { 'text-opacity': 0.85 }) },
+        layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['coalesce', ['get', 'ref'], NAMEX], 'text-font': FONT, 'text-size': 10, 'symbol-spacing': 320, 'text-max-angle': 30 }, lblVis), paint: Object.assign({}, haloText, { 'text-opacity': 0.85 }) },
       { id: 'label-ovr-road2', type: 'symbol', source: 'ovr', 'source-layer': 'road', minzoom: 12, maxzoom: 14, filter: ['all', roadClassIn(['secondary', 'tertiary']), ['any', ['has', 'ref'], ['has', 'name']]],
-        layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['coalesce', ['get', 'name'], ['get', 'ref']], 'text-font': FONT, 'text-size': 9.5, 'symbol-spacing': 320, 'text-max-angle': 30 }, lblVis), paint: Object.assign({}, haloText, { 'text-opacity': 0.75 }) },
+        layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['coalesce', NAMEX, ['get', 'ref']], 'text-font': FONT, 'text-size': 9.5, 'symbol-spacing': 320, 'text-max-angle': 30 }, lblVis), paint: Object.assign({}, haloText, { 'text-opacity': 0.75 }) },
       { id: 'station-dot', type: 'circle', source: 'ovr', 'source-layer': 'station', minzoom: 11, layout: lblVis,
         paint: { 'circle-color': ['case', ['==', ['get', 'kind'], 'subway'], Z.stMetro, Z.stRail], 'circle-radius': ['case', ['==', ['get', 'kind'], 'halt'], 2.5, 3.8], 'circle-stroke-color': c.halo, 'circle-stroke-width': 1.2 } },
       { id: 'label-station', type: 'symbol', source: 'ovr', 'source-layer': 'station', minzoom: 12, filter: ['has', 'name'],
-        layout: Object.assign({ 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 10, 'text-anchor': 'top', 'text-offset': [0, 0.6], 'text-max-width': 7 }, lblVis),
+        layout: Object.assign({ 'text-field': NAMEX, 'text-font': FONT, 'text-size': 10, 'text-anchor': 'top', 'text-offset': [0, 0.6], 'text-max-width': 7 }, lblVis),
         paint: { 'text-color': Z.stText, 'text-halo-color': c.halo, 'text-halo-width': 1.4 } },
       { id: 'peak', type: 'symbol', source: 'ovr', 'source-layer': 'peak', minzoom: 9,
         layout: Object.assign({ 'icon-image': 'peak-icon', 'icon-size': 0.85, 'symbol-sort-key': ['-', 0, ['coalesce', ['get', 'ele'], 0]], 'text-optional': true,
@@ -354,15 +358,22 @@
           layout: Object.assign({ 'text-field': ['get', 'housenumber'], 'text-font': FONT, 'text-size': zs([17, 9, 19, 12]), 'text-max-width': 5 }, lblVis),
           paint: { 'text-color': c.typed ? '#7d6b5f' : c.text, 'text-opacity': 0.85, 'text-halo-color': c.bFill, 'text-halo-width': 1 } },
         { id: 'label-address', type: 'symbol', source: 'base', 'source-layer': 'address', minzoom: 17,
-          layout: Object.assign({ 'text-field': ['coalesce', ['get', 'name'], ['get', 'housenumber']], 'text-font': FONT, 'text-size': zs([17, 9, 19, 12]), 'text-max-width': 6 }, lblVis),
+          layout: Object.assign({ 'text-field': ['coalesce', NAMEX, ['get', 'housenumber']], 'text-font': FONT, 'text-size': zs([17, 9, 19, 12]), 'text-max-width': 6 }, lblVis),
           paint: { 'text-color': c.typed ? '#7d6b5f' : c.text, 'text-halo-color': c.halo, 'text-halo-width': 1.2 } },
-        { id: 'transit-stop', type: 'symbol', source: 'ovr', 'source-layer': 'transit', minzoom: 16, filter: ['==', ['get', 'kind'], 'stop'],
+        { id: 'transit-route', type: 'line', source: 'ovr', 'source-layer': 'transit_route', minzoom: 10,
+          layout: Object.assign({ 'line-cap': 'round', 'line-join': 'round' }, vis(ov.transit)),
+          paint: { 'line-color': ['match', ['get', 'route'], 'subway', '#2563eb', 'tram', '#dc2626', 'trolleybus', '#16a34a', 'bus', '#f59e0b', 'train', '#6b7280', '#8b5cf6'],
+            'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1, 14, 2.5, 18, 5], 'line-opacity': 0.75 } },
+        { id: 'transit-route-ref', type: 'symbol', source: 'ovr', 'source-layer': 'transit_route', minzoom: 13, filter: ['has', 'ref'],
+          layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['get', 'ref'], 'text-font': FONT, 'text-size': 10, 'symbol-spacing': 400 }, vis(ov.transit)),
+          paint: { 'text-color': c.text, 'text-halo-color': c.halo, 'text-halo-width': 1.5 } },
+        { id: 'transit-stop', type: 'symbol', source: 'ovr', 'source-layer': 'transit', minzoom: 15, filter: ['==', ['get', 'kind'], 'stop'],
           layout: Object.assign({ 'icon-image': 'maki:bus:0066ff', 'icon-size': zs([16, 0.8, 19, 1.1]), 'icon-padding': 4, 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 10,
-            'text-anchor': 'top', 'text-offset': [0, 1.1], 'text-optional': true, 'text-max-width': 7 }, lblVis),
+            'text-anchor': 'top', 'text-offset': [0, 1.1], 'text-optional': true, 'text-max-width': 7 }, vis(ov.transit)),
           paint: { 'text-color': '#0066ff', 'text-halo-color': c.halo, 'text-halo-width': 1.2 } },
         { id: 'transit-metro', type: 'symbol', source: 'ovr', 'source-layer': 'transit', minzoom: 16, filter: ['==', ['get', 'kind'], 'metro'],
           layout: Object.assign({ 'icon-image': 'maki:rail-metro:2b6cb0', 'icon-size': zs([16, 0.95, 19, 1.3]), 'icon-allow-overlap': true, 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 10.5,
-            'text-anchor': 'top', 'text-offset': [0, 1.2], 'text-optional': true, 'text-max-width': 7 }, lblVis),
+            'text-anchor': 'top', 'text-offset': [0, 1.2], 'text-optional': true, 'text-max-width': 7 }, vis(ov.transit)),
           paint: { 'text-color': '#2b6cb0', 'text-halo-color': c.halo, 'text-halo-width': 1.3 } },
         { id: 'transit-crossing', type: 'circle', source: 'ovr', 'source-layer': 'transit', minzoom: 18, filter: ['==', ['get', 'kind'], 'crossing'],
           paint: { 'circle-color': c.text, 'circle-opacity': 0.55, 'circle-radius': 2 } },
@@ -372,10 +383,10 @@
         { id: 'bnd4', type: 'line', source: 'bnd4', 'source-layer': 'boundary_polygon_lvl4', minzoom: 5, layout: vis(ov.boundaries), paint: { 'line-color': c.border, 'line-opacity': 0.7, 'line-width': 1, 'line-dasharray': [2, 2] } },
         label('label-water', 'water', 12, { paint: { 'text-color': c.waterText }, layout: { 'text-size': zs([12, 10, 16, 13]), 'text-letter-spacing': 0.05 } }),
         { id: 'label-waterway', type: 'symbol', source: 'base', 'source-layer': 'water_line', minzoom: 12, filter: ['all', ['has', 'name'], ['==', ['get', 'waterway'], 'river']],
-          layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 11, 'symbol-spacing': 350, 'text-letter-spacing': 0.12 }, lblVis),
+          layout: Object.assign({ 'symbol-placement': 'line', 'text-field': NAMEX, 'text-font': FONT, 'text-size': 11, 'symbol-spacing': 350, 'text-letter-spacing': 0.12 }, lblVis),
           paint: { 'text-color': c.waterText, 'text-halo-color': c.halo, 'text-halo-width': 1.2 } },
         { id: 'label-waterway-minor', type: 'symbol', source: 'base', 'source-layer': 'water_line', minzoom: 14, filter: ['all', ['has', 'name'], ['in', ['coalesce', ['get', 'waterway'], ''], ['literal', ['canal', 'stream']]]],
-          layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 10, 'symbol-spacing': 300 }, lblVis),
+          layout: Object.assign({ 'symbol-placement': 'line', 'text-field': NAMEX, 'text-font': FONT, 'text-size': 10, 'symbol-spacing': 300 }, lblVis),
           paint: { 'text-color': c.waterText, 'text-halo-color': c.halo, 'text-halo-width': 1.2 } },
         label('label-highway', 'highway', 14, { layout: { 'symbol-placement': 'line', 'text-size': 11, 'symbol-spacing': 280, 'text-max-angle': 30 } }),
         label('label-building', 'building', 17, { layout: { 'text-size': 10 }, paint: { 'text-opacity': 0.85 } }),
@@ -770,7 +781,7 @@
       return { title: t('layers'), html:
         '<h3>' + t('baseMap') + '</h3><div class="choice">' +
         themeOpt('standard', 'linear-gradient(135deg,#f2efe9 55%,#aad3df 55%)') + themeOpt('light', 'linear-gradient(135deg,#f3f4f6 55%,#cfe2ee 55%)') + themeOpt('dark', 'linear-gradient(135deg,#10151b 55%,#17364a 55%)') + '</div>' +
-        '<h3>' + t('overlays') + '</h3>' + ck('buildings', 'ovBuildings') + ck('poi', 'ovPoi') + ck('boundaries', 'ovBoundaries') + ck('labels', 'ovLabels') };
+        '<h3>' + t('overlays') + '</h3>' + ck('buildings', 'ovBuildings') + ck('poi', 'ovPoi') + ck('boundaries', 'ovBoundaries') + ck('transit', 'ovTransit') + ck('labels', 'ovLabels') };
     },
     legend: function () {
       var c = THEMES[state.theme];
@@ -887,6 +898,7 @@
   function setLang(l) {
     I18N.set(l); langCode.textContent = l.toUpperCase();
     document.getElementById('lang-menu').hidden = true;
+    map.setStyle(buildStyle());
     render();
   }
   document.querySelectorAll('[data-lang]').forEach(function (b) { b.onclick = function () { setLang(b.dataset.lang); }; });

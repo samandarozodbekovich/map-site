@@ -1,12 +1,3 @@
-// Local dev proxy: replaces the Docker nginx while testing without containers.
-//   /            -> static files from ./public (fallback: editor)
-//   /edit/*      -> iD editor (npm start)          http://127.0.0.1:8080/*
-//   /api /oauth2 /admin /static -> Django          http://127.0.0.1:8000
-//   /tiles/*     -> Martin                          http://127.0.0.1:3000/*
-//   /route/*     -> OSRM routing http://127.0.0.1:5000/*   (docker compose up -d osrm)
-//   /labels/*    -> label PNG tiles (TileServer GL) http://127.0.0.1:8085/*   (docker compose up -d labels)
-// Run:  node dev-proxy.js     then open http://127.0.0.1:8099/
-// No npm dependencies needed.
 
 const http = require('http');
 const net = require('net');
