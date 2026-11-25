@@ -3,6 +3,7 @@
 //   /edit/*      -> iD editor (npm start)          http://127.0.0.1:8080/*
 //   /api /oauth2 /admin /static -> Django          http://127.0.0.1:8000
 //   /tiles/*     -> Martin                          http://127.0.0.1:3000/*
+//   /route/*     -> OSRM routing http://127.0.0.1:5000/*   (docker compose up -d osrm)
 //   /labels/*    -> label PNG tiles (TileServer GL) http://127.0.0.1:8085/*   (docker compose up -d labels)
 // Run:  node dev-proxy.js     then open http://127.0.0.1:8099/
 // No npm dependencies needed.
@@ -19,6 +20,7 @@ const T = {
   django: { host: '127.0.0.1', port: Number(process.env.DJANGO_PORT || 8000) },
   martin: { host: '127.0.0.1', port: 3000 },
   labels: { host: '127.0.0.1', port: 8085 },
+  route: { host: '127.0.0.1', port: 5000 },
 };
 
 const MIME = {
@@ -32,6 +34,7 @@ function route(url) {
   if (url === '/edit') return { redirect: '/edit/' };
   if (url.startsWith('/edit/')) return { t: T.editor, url: url.slice('/edit'.length) };
   if (url.startsWith('/tiles/')) return { t: T.martin, url: url.slice('/tiles'.length) };
+  if (url.startsWith('/route/')) return { t: T.route, url: url.slice('/route'.length) };
   if (url.startsWith('/labels/')) return { t: T.labels, url: url.slice('/labels'.length) };
   if (/^\/(api|oauth2|admin|static)\//.test(url)) return { t: T.django, url };
   return null;

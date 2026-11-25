@@ -525,6 +525,7 @@
       });
   }
   map.on('click', function (e) {
+    if (dirs.picking) { var k = dirs.picking; dirs.picking = null; setPoint(k, e.lngLat.lng, e.lngLat.lat); return; }
     var f = featureAt(e.point, 5);
     if (!f) return;
     var arg = { f: f, lngLat: e.lngLat, detail: null, loading: false };
@@ -578,6 +579,139 @@
     if (e.target.closest('[data-hist-more]')) loadHistory();
   });
 
+  // ── Directions: OSRM through /route/ (car) ───────────────────────────────
+  var dirs = { from: null, to: null, picking: null, route: null, busy: false, error: '', seq: 0 };
+  var dirMarkers = {};
+  var EMPTY_FC = { type: 'FeatureCollection', features: [] };
+  function el(id) { return document.getElementById(id); }
+
+  function ensureRouteLayers() {
+    if (!map.getSource('route')) map.addSource('route', { type: 'geojson', data: dirs.route ? dirs.route.geometry : EMPTY_FC });
+    if (!map.getLayer('route-casing')) map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 } });
+    if (!map.getLayer('route-line')) map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2563eb', 'line-width': 5 } });
+  }
+  // setStyle() (theme / overlay switch) wipes our layers: put them back
+  map.on('styledata', function () { if (dirs.route && !map.getSource('route') && map.isStyleLoaded()) ensureRouteLayers(); });
+
+  function pinDot(letter, cls) { var d = document.createElement('div'); d.className = 'rt-pin ' + cls; d.textContent = letter; return d; }
+  function drawMarkers() {
+    [['from', 'A'], ['to', 'B']].forEach(function (p) {
+      var pt = dirs[p[0]], m = dirMarkers[p[0]];
+      if (!pt) { if (m) { m.remove(); delete dirMarkers[p[0]]; } return; }
+      if (!m) m = dirMarkers[p[0]] = new maplibregl.Marker({ element: pinDot(p[1], p[0]) });
+      m.setLngLat([pt.lon, pt.lat]).addTo(map);
+    });
+  }
+  function fmtDist(m) { return m >= 1000 ? (m / 1000).toFixed(m >= 10000 ? 0 : 1) + ' ' + t('d_km') : (Math.round(m / 10) * 10) + ' ' + t('d_m'); }
+  function fmtTime(sec) {
+    var min = Math.max(1, Math.round(sec / 60));
+    return min < 60 ? min + ' ' + t('d_min') : Math.floor(min / 60) + ' ' + t('d_hour') + ' ' + (min % 60) + ' ' + t('d_min');
+  }
+  var TURN_KEY = { 'left': 'r_left', 'right': 'r_right', 'slight left': 'r_slight_left', 'slight right': 'r_slight_right', 'sharp left': 'r_sharp_left', 'sharp right': 'r_sharp_right', 'straight': 'r_straight', 'uturn': 'r_uturn' };
+  function stepText(st) {
+    var m = st.maneuver || {}, name = st.name || '', text;
+    if (m.type === 'depart') text = t('r_depart');
+    else if (m.type === 'arrive') text = t('r_arrive');
+    else if (m.type === 'roundabout' || m.type === 'rotary' || m.type === 'roundabout turn') text = m.exit ? t('r_roundabout').replace('{n}', m.exit) : t('r_roundabout0');
+    else text = t(TURN_KEY[m.modifier] || 'r_continue');
+    return text + (name && m.type !== 'arrive' ? ' — ' + name : '');
+  }
+  function renderRoute() {
+    var box = el('dir-result'); if (!box) return;
+    if (dirs.picking) { box.innerHTML = '<p class="muted">' + esc(t('d_pickHint')) + '</p>'; return; }
+    if (dirs.busy) { box.innerHTML = '<p class="muted">' + esc(t('d_calc')) + '</p>'; return; }
+    if (dirs.error) { box.innerHTML = '<p>' + esc(t(dirs.error)) + '</p>'; return; }
+    if (!dirs.route) { box.innerHTML = '<p class="muted">' + esc(t('d_dirHint')) + '</p>'; return; }
+    var r = dirs.route;
+    box.innerHTML = '<div class="rt-sum"><b>' + esc(fmtTime(r.duration)) + '</b><span>' + esc(fmtDist(r.distance)) + ' · ' + esc(t('d_car')) + '</span></div>' +
+      '<ol class="rt-steps">' + r.steps.map(function (st) {
+        return '<li><span>' + esc(stepText(st)) + '</span><em>' + (st.distance >= 10 ? esc(fmtDist(st.distance)) : '') + '</em></li>';
+      }).join('') + '</ol>';
+  }
+  function clearRoute() {
+    dirs.route = null; dirs.error = ''; dirs.seq++; dirs.busy = false;
+    var src = map.getSource('route'); if (src) src.setData(EMPTY_FC);
+  }
+  function calcRoute() {
+    if (!dirs.from || !dirs.to) { clearRoute(); renderRoute(); return; }
+    var seq = ++dirs.seq; dirs.busy = true; dirs.error = ''; renderRoute();
+    var url = '/route/route/v1/driving/' + dirs.from.lon.toFixed(6) + ',' + dirs.from.lat.toFixed(6) + ';' + dirs.to.lon.toFixed(6) + ',' + dirs.to.lat.toFixed(6) +
+      '?overview=full&geometries=geojson&steps=true';
+    fetch(url).then(function (r) { return r.json(); })
+      .then(function (body) {
+        if (seq !== dirs.seq) return;
+        var rt = body && body.routes && body.routes[0];
+        if (!rt) { dirs.route = null; dirs.error = 'd_noRoute'; return; }
+        dirs.route = { geometry: rt.geometry, distance: rt.distance, duration: rt.duration,
+          steps: [].concat.apply([], rt.legs.map(function (l) { return l.steps; })) };
+        ensureRouteLayers(); map.getSource('route').setData(rt.geometry);
+        var first = rt.geometry.coordinates[0];
+        var b = rt.geometry.coordinates.reduce(function (bb, c) { return bb.extend(c); }, new maplibregl.LngLatBounds(first, first));
+        map.fitBounds(b, { padding: { top: 90, bottom: 60, left: 400, right: 70 }, maxZoom: 16, duration: 900 });
+      })
+      .catch(function () { if (seq === dirs.seq) { dirs.route = null; dirs.error = 'd_routeErr'; } })
+      .then(function () { if (seq === dirs.seq) { dirs.busy = false; renderRoute(); } });
+  }
+  function setPoint(k, lon, lat, label) {
+    dirs[k] = { lon: lon, lat: lat, label: label || (lat.toFixed(5) + ', ' + lon.toFixed(5)) };
+    var inp = el('dir-' + k); if (inp) inp.value = dirs[k].label;
+    drawMarkers(); calcRoute();
+  }
+  function bindDirections() {
+    var sug = el('dir-sug'), timer, seq = 0, activeKey = 'to';
+    ['from', 'to'].forEach(function (k) {
+      var inp = el('dir-' + k); if (!inp) return;
+      inp.value = dirs[k] ? dirs[k].label : '';
+      inp.addEventListener('input', function () {
+        activeKey = k; clearTimeout(timer);
+        var text = inp.value.trim();
+        if (text.length < 3) { sug.hidden = true; return; }
+        timer = setTimeout(function () {
+          var c = map.getCenter(), mine = ++seq;
+          fetch('/api/search/?q=' + encodeURIComponent(text) + '&lon=' + c.lng.toFixed(4) + '&lat=' + c.lat.toFixed(4) + '&limit=6')
+            .then(function (r) { return r.ok ? r.json() : { results: [] }; }).catch(function () { return { results: [] }; })
+            .then(function (d) {
+              if (mine !== seq) return;
+              sug.innerHTML = d.results.map(function (r, i) {
+                return '<li data-i="' + i + '"><b>' + esc(r.name) + '</b><span>' + esc([t('k_' + r.kind), r.subtitle].filter(Boolean).join(' · ')) + '</span></li>';
+              }).join('');
+              sug._res = d.results; sug.hidden = !d.results.length;
+              inp.parentNode.insertAdjacentElement('afterend', sug);
+            });
+        }, 250);
+      });
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !sug.hidden && sug._res && sug._res[0]) { e.preventDefault(); var r = sug._res[0]; sug.hidden = true; setPoint(k, r.lon, r.lat, r.name); }
+      });
+    });
+    sug.addEventListener('mousedown', function (e) {
+      var li = e.target.closest('li'); if (!li || !sug._res) return;
+      e.preventDefault(); var r = sug._res[+li.dataset.i]; sug.hidden = true; setPoint(activeKey, r.lon, r.lat, r.name);
+    });
+    renderRoute();
+  }
+  document.addEventListener('click', function (e) {
+    var pick = e.target.closest('[data-dir-pick]');
+    if (pick) { dirs.picking = pick.dataset.dirPick; renderRoute(); return; }
+    if (e.target.closest('[data-dir-me]')) {
+      if (!navigator.geolocation) return toast(t('geoDenied'));
+      navigator.geolocation.getCurrentPosition(function (pos) { setPoint('from', pos.coords.longitude, pos.coords.latitude, t('d_me')); }, function () { toast(t('geoDenied')); });
+      return;
+    }
+    if (e.target.closest('[data-dir-swap]')) {
+      var a = dirs.from; dirs.from = dirs.to; dirs.to = a;
+      ['from', 'to'].forEach(function (k) { var inp = el('dir-' + k); if (inp) inp.value = dirs[k] ? dirs[k].label : ''; });
+      drawMarkers(); calcRoute(); return;
+    }
+    if (e.target.closest('[data-dir-clear]')) {
+      dirs.from = dirs.to = dirs.picking = null; clearRoute(); drawMarkers();
+      ['from', 'to'].forEach(function (k) { var inp = el('dir-' + k); if (inp) inp.value = ''; });
+      renderRoute(); return;
+    }
+    var to = e.target.closest('[data-dir-to]');
+    if (to) { var d = JSON.parse(to.dataset.dirTo); openPanel('directions'); setPoint('to', d.lon, d.lat, d.label); }
+  });
+
   var PANELS = {
     welcome: function () {
       return { title: t('welcomeTitle'), html:
@@ -609,7 +743,18 @@
     help: function () { return simple('helpTitle', 'helpText'); },
     about: function () { return simple('aboutTitle', 'aboutText'); },
     copyright: function () { return simple('copyrightTitle', 'copyrightText'); },
-    directions: function () { return simple('directionsTitle', 'directionsText'); },
+    directions: function () {
+      var row = function (k, letter, icons) {
+        return '<div class="dir-row"><b class="dot ' + k + '">' + letter + '</b><input id="dir-' + k + '" type="text" autocomplete="off" placeholder="' + esc(t('d_' + k + 'Ph')) + '" aria-label="' + esc(t('d_' + k)) + '">' + icons + '</div>';
+      };
+      var btn = function (attr, icon, title) { return '<button type="button" class="ico" ' + attr + ' title="' + esc(title) + '" aria-label="' + esc(title) + '"><i data-icon="' + icon + '"></i></button>'; };
+      return { title: t('directionsTitle'), html: '<div class="dir">' +
+        row('from', 'A', btn('data-dir-me="1"', 'locate', t('d_me')) + btn('data-dir-pick="from"', 'pin', t('d_pick'))) +
+        row('to', 'B', btn('data-dir-pick="to"', 'pin', t('d_pick'))) +
+        '<ul id="dir-sug" class="dir-sug" hidden></ul>' +
+        '<div class="btn-row"><button type="button" class="btn" data-dir-swap="1">&#8645; ' + esc(t('d_swap')) + '</button><button type="button" class="btn" data-dir-clear="1">' + esc(t('d_clear')) + '</button></div>' +
+        '<div id="dir-result"></div></div>' };
+    },
     export: function () {
       var b = map.getBounds();
       var bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(function (v) { return v.toFixed(5); }).join(',');
@@ -673,6 +818,7 @@
       }
       return { title: title, html: html + '<dl class="kv"><dt>' + t('coords') + '</dt><dd>' + ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6) + '</dd></dl>' +
         '<div class="btn-row"><a class="btn primary" href="/edit/#map=19/' + ll.lat.toFixed(6) + '/' + ll.lng.toFixed(6) + (ids ? '&id=' + ids : '') + '">' + t('editThis') + '</a>' +
+        '<button type="button" class="btn" data-dir-to="' + esc(JSON.stringify({ lon: ll.lng, lat: ll.lat, label: d && d.name ? d.name : ll.lat.toFixed(5) + ', ' + ll.lng.toFixed(5) })) + '">' + t('d_here') + '</button>' +
         (d && d.osm_id ? '<a class="btn" target="_blank" rel="noopener" href="https://www.openstreetmap.org/' + esc(d.osm_type) + '/' + d.osm_id + '">' + t('d_osm') + '</a>' : '') + '</div>' };
     }
   };
@@ -688,6 +834,7 @@
     renderIcons(sideBody);
     sidebar.hidden = false;
     markActive(current);
+    if (current === 'directions') bindDirections();
   }
   function openPanel(name, arg) {
     if (current === name && name !== 'object' && !arg) { closePanel(); return; } // toggle
