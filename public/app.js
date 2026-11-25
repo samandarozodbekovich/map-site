@@ -392,6 +392,12 @@
         label('label-building', 'building', 17, { layout: { 'text-size': 10 }, paint: { 'text-opacity': 0.85 } }),
         { id: 'bnd6', type: 'line', source: 'bnd6', 'source-layer': 'boundary_polygon_lvl6', minzoom: 8, layout: vis(ov.boundaries), paint: { 'line-color': c.border, 'line-opacity': 0.5, 'line-width': 0.8, 'line-dasharray': [1, 2] } },
         { id: 'bnd8', type: 'line', source: 'bnd8', 'source-layer': 'boundary_polygon_lvl8', minzoom: 11, layout: vis(ov.boundaries), paint: { 'line-color': c.border, 'line-opacity': 0.4, 'line-width': 0.8, 'line-dasharray': [1, 2] } },
+        // quarters (kvartal / mavze): dashed outline from z14, name from z15 (the mahalla point labels above win when both overlap)
+        { id: 'quarter-line', type: 'line', source: 'base', 'source-layer': 'landuse', minzoom: 14, filter: ['all', ['==', ['get', 'landuse'], 'residential'], ['has', 'name']],
+          layout: vis(ov.boundaries), paint: { 'line-color': c.typed ? '#b59a7a' : c.border, 'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.8, 17, 1.6], 'line-dasharray': [3, 2], 'line-opacity': 0.8 } },
+        { id: 'label-quarter', type: 'symbol', source: 'base', 'source-layer': 'landuse', minzoom: 15, filter: ['all', ['==', ['get', 'landuse'], 'residential'], ['has', 'name']],
+          layout: Object.assign({ 'text-field': NAMEX, 'text-font': FONT, 'text-size': zs([15, 9.5, 18, 12]), 'text-letter-spacing': 0.06, 'text-max-width': 7 }, lblVis),
+          paint: { 'text-color': c.typed ? '#8a6d4b' : c.text, 'text-halo-color': c.halo, 'text-halo-width': 1.3, 'text-opacity': 0.85 } },
         label('label-poi', 'poi', 15, { layout: { 'text-size': 11, 'text-offset': [0, 1.3], 'text-anchor': 'top', 'text-optional': true } })
       ])
       .concat(overviewLabels);
