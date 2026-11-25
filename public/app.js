@@ -499,7 +499,13 @@
   var marker = null;
   function setMarker(lon, lat) {
     if (marker) marker.remove();
-    marker = new maplibregl.Marker({ element: pinEl(), anchor: 'bottom' }).setLngLat([lon, lat]).addTo(map);
+    marker = new maplibregl.Marker({ element: pinEl(), anchor: 'bottom', draggable: true }).setLngLat([lon, lat]).addTo(map);
+    // press and hold the pin, then move it: the share link follows the new place
+    marker.on('dragend', function () {
+      var p = marker.getLngLat();
+      toast(p.lat.toFixed(6) + ', ' + p.lng.toFixed(6));
+      if (current === 'share') render();
+    });
   }
   if (qs.has('mlat') && qs.has('mlon') && isFinite(+qs.get('mlat')) && isFinite(+qs.get('mlon'))) setMarker(+qs.get('mlon'), +qs.get('mlat'));
 
@@ -609,7 +615,10 @@
     [['from', 'A'], ['to', 'B']].forEach(function (p) {
       var pt = dirs[p[0]], m = dirMarkers[p[0]];
       if (!pt) { if (m) { m.remove(); delete dirMarkers[p[0]]; } return; }
-      if (!m) m = dirMarkers[p[0]] = new maplibregl.Marker({ element: pinDot(p[1], p[0]) });
+      if (!m) {
+        m = dirMarkers[p[0]] = new maplibregl.Marker({ element: pinDot(p[1], p[0]), draggable: true });
+        m.on('dragend', function () { var ll = m.getLngLat(); setPoint(p[0], ll.lng, ll.lat); });   // new place -> new route
+      }
       m.setLngLat([pt.lon, pt.lat]).addTo(map);
     });
   }
@@ -792,7 +801,8 @@
     share: function () {
       var c = map.getCenter(), z = Math.round(map.getZoom());
       var withMarker = !!(currentArg && currentArg.marker);
-      var q = withMarker ? '?mlat=' + c.lat.toFixed(6) + '&mlon=' + c.lng.toFixed(6) : '';
+      var mp = withMarker && marker ? marker.getLngLat() : c;
+      var q = withMarker ? '?mlat=' + mp.lat.toFixed(6) + '&mlon=' + mp.lng.toFixed(6) : '';
       var link = location.origin + '/' + q + posHash();
       var geo = 'geo:' + c.lat.toFixed(6) + ',' + c.lng.toFixed(6) + '?z=' + z;
       var embed = '<iframe src="' + link + '" width="425" height="350" style="border:0" loading="lazy"></iframe>';
