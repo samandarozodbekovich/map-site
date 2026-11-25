@@ -212,3 +212,7 @@ svg.i { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-widt
 .rt-steps em { font-style: normal; color: var(--card-muted); white-space: nowrap; font-size: 12.5px; }
 .rt-pin, .pin { cursor: grab; touch-action: none; }
 .maplibregl-marker:active .rt-pin, .maplibregl-marker:active .pin { cursor: grabbing; }
+.state { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.state.on { background: rgba(34, 197, 94, .18); color: #16a34a; }
+.state.off { background: rgba(220, 38, 38, .15); color: #dc2626; }
+.kv a { color: #2563eb; word-break: break-all; }

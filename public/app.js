@@ -596,6 +596,82 @@
     if (e.target.closest('[data-hist-more]')) loadHistory();
   });
 
+  // ── Contact details of an object (osm_object_details; text comes from OSM, so it is escaped and links are checked) ──
+  function safeUrl(u) {
+    u = String(u || '').trim();
+    if (!u) return '';
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
+    return /^https?:\/\//i.test(u) ? u : '';
+  }
+  function telLinks(v) {
+    return String(v).split(/[;,]/).map(function (p) {
+      var digits = p.replace(/[^\d+]/g, '');
+      return digits.length >= 5 ? '<a href="tel:' + esc(digits) + '">' + esc(p.trim()) + '</a>' : esc(p.trim());
+    }).filter(Boolean).join('<br>');
+  }
+  // opening_hours subset: "24/7", "Mo-Fr 09:00-18:00; Sa 10:00-14:00", "off"; anything else -> null (no open/closed badge)
+  var DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  function openNow(spec, now) {
+    spec = String(spec || '').trim();
+    if (spec === '24/7') return true;
+    var day = now.getDay(), mins = now.getHours() * 60 + now.getMinutes(), result = null, known = false;
+    var rules = spec.split(';');
+    for (var i = 0; i < rules.length; i++) {
+      var m = /^\s*(?:([A-Za-z,\- ]+?)\s+)?((?:\d{1,2}:\d{2}-\d{1,2}:\d{2}(?:\s*,\s*)?)+|off|closed)\s*$/.exec(rules[i]);
+      if (!m) return null;
+      known = true;
+      var days = m[1] ? daySet(m[1]) : [0, 1, 2, 3, 4, 5, 6];
+      if (!days) return null;
+      if (days.indexOf(day) < 0) continue;
+      if (/^(off|closed)$/.test(m[2])) { result = false; continue; }
+      var ranges = m[2].split(','), on = false;
+      for (var j = 0; j < ranges.length; j++) {
+        var t2 = /(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})/.exec(ranges[j]);
+        if (!t2) return null;
+        var a = +t2[1] * 60 + +t2[2], b = +t2[3] * 60 + +t2[4];
+        if (b <= a) b += 1440;                      // 22:00-02:00 runs past midnight
+        if ((mins >= a && mins < b) || (mins + 1440 >= a && mins + 1440 < b)) on = true;
+      }
+      result = on;
+    }
+    return known ? (result === null ? false : result) : null;
+  }
+  function daySet(txt) {
+    var out = [], parts = txt.replace(/\s/g, '').split(',');
+    for (var i = 0; i < parts.length; i++) {
+      var r = parts[i].split('-'), a = DAYS.indexOf(r[0]), b = r.length > 1 ? DAYS.indexOf(r[1]) : a;
+      if (a < 0 || b < 0) return null;               // holidays (PH), weeks, months ... are not understood
+      for (var d = a; ; d = (d + 1) % 7) { out.push(d); if (d === b) break; }
+    }
+    return out;
+  }
+  function contactRows(c, row) {
+    var html = '', human = function (v) { v = String(v).replace(/_/g, ' '); return v.charAt(0).toUpperCase() + v.slice(1); };
+    var rawRow = function (k, v) { return v ? '<dt>' + t(k) + '</dt><dd>' + v + '</dd>' : ''; };   // v is already escaped HTML
+    var phones = [c.phone, c.mobile].filter(Boolean).join(';');
+    html += rawRow('c_phone', phones ? telLinks(phones) : '');
+    if (c.opening_hours) {
+      var st = openNow(c.opening_hours, new Date());
+      html += rawRow('c_hours', esc(c.opening_hours) + (st === null ? '' : ' <span class="state ' + (st ? 'on' : 'off') + '">' + esc(t(st ? 'c_open' : 'c_closed')) + '</span>'));
+    }
+    var web = safeUrl(c.website);
+    html += rawRow('c_web', web ? '<a href="' + esc(web) + '" target="_blank" rel="noopener noreferrer">' + esc(web.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '')) + '</a>' : '');
+    html += rawRow('c_email', c.email && /^[^\s@<>"]+@[^\s@<>"]+$/.test(c.email) ? '<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + '</a>' : '');
+    var socials = ['facebook', 'instagram', 'telegram'].filter(function (k) { return c[k]; }).map(function (k) {
+      var u = safeUrl(c[k]);
+      return u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + human(k) + '</a>' : esc(human(k) + ': ' + c[k]);
+    }).join(' · ');
+    html += rawRow('c_social', socials);
+    html += rawRow('c_cuisine', c.cuisine ? esc(c.cuisine.split(';').map(human).join(', ')) : '');
+    html += rawRow('c_wheelchair', c.wheelchair ? esc(c.wheelchair === 'yes' ? t('a_yes') : human(c.wheelchair)) : '');
+    html += rawRow('c_internet', c.internet_access ? esc(c.internet_access === 'no' ? human('no') : human(c.internet_access)) : '');
+    html += rawRow('c_operator', c.operator ? esc(c.operator) : '');
+    html += rawRow('c_brand', c.brand && c.brand !== c.operator ? esc(c.brand) : '');
+    var desc = c['description_' + I18N.get()] || c.description;
+    html += rawRow('c_desc', desc ? esc(desc) : '');
+    return html;
+  }
+
   // ── Directions: OSRM through /route/ (car) ───────────────────────────────
   var dirs = { from: null, to: null, picking: null, route: null, busy: false, error: '', seq: 0 };
   var dirMarkers = {};
@@ -831,6 +907,7 @@
         ['ref', 'oneway', 'maxspeed', 'lanes', 'width', 'surface', 'bridge', 'tunnel'].forEach(function (k) {
           if (d.attrs[k]) rows += row('a_' + k, d.attrs[k] === 'yes' ? t('a_yes') : human(d.attrs[k]));
         });
+        rows += contactRows(d.contact || {}, row);
         rows += row('d_region', d.place.region) + row('d_district', d.place.district) + row('d_area8', d.place.area);
         html = '<dl class="kv">' + rows + '</dl>';
         ids = d.osm_id ? d.osm_type.charAt(0) + d.osm_id : '';
