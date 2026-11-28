@@ -1,4 +1,3 @@
-/* Texts for the login / sign-up / forgot-password pages and the account chip in the top bar (uz, ru, en). */
 (function () {
   var S = {
     uz: {

@@ -2,7 +2,7 @@
   'use strict';
 
   var t = I18N.t;
-  var DEFAULT_VIEW = { zoom: 12, lat: 41.3111, lon: 69.2797 }; // Tashkent
+  var DEFAULT_VIEW = { zoom: 12, lat: 41.3111, lon: 69.2797 };
   var store = {
     get: function (k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
     set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -10,7 +10,6 @@
   var ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return ESC[c]; }); }
 
-  // ── Icons (Lucide-style strokes) ────────────────────────────────────────
   var ICONS = {
     pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.6"/>',
     pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
@@ -40,7 +39,6 @@
     });
   }
 
-  // ── URL: #map=zoom/lat/lon (same format as OSM and iD), ?mlat&mlon ──────
   function readHash() {
     var m = /map=(\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/.exec(location.hash);
     return m ? { zoom: +m[1], lat: +m[2], lon: +m[3] } : DEFAULT_VIEW;
@@ -48,14 +46,10 @@
   var qs = new URLSearchParams(location.search);
   var start = readHash();
 
-  // ── Map style ───────────────────────────────────────────────────────────
-  // Vector layer names (water, landuse, highway, ...) come from the Martin
-  // basemap_tiles SQL function; admin borders from boundary_polygon_lvl* tables.
   var THEMES = {
     standard: { bg: '#f2efe9', water: '#aad3df', landuse: '#ebe8e0', veg: '#c8e1b0', parking: '#ebe7de', bFill: '#d9d0c9', bLine: '#bdb2a8',
                 road: '#ffffff', casing: '#c4b8a8', rail: '#8a8a8a', poi: '#d9453b', text: '#333333', halo: '#ffffff', border: '#8e5ea2', waterText: '#4a7f93',
                 typed: true,
-                // [fill, casing] per road class (OSM-carto palette)
                 roads: { motorway: ['#e892a2', '#dc2a67'], primary: ['#fcd6a4', '#d09a45'], secondary: ['#f7fabf', '#a9b04a'], tertiary: ['#ffffff', '#a8a8a8'],
                          minor: ['#ffffff', '#bbbbbb'], service: ['#ffffff', '#c4c4c4'], path: ['#f4796b'], track: ['#a07a3c'] } },
     light:    { bg: '#f3f4f6', water: '#cfe2ee', landuse: '#e7eae7', veg: '#dbe8d8', parking: '#e9eaee', bFill: '#e2e4e9', bLine: '#cdd1d9',
@@ -68,7 +62,6 @@
                          minor: ['#37424f', '#1b222b'], service: ['#2f3945', '#1b222b'], path: ['#56606d'], track: ['#4d4a3f'] } }
   };
 
-  // Land cover palette for the small-zoom overview: country land vs. neighbours, desert, steppe, forest, oases, reserves
   var LAND = {
     standard: { out: '#e6e4de', land: '#f6f1e2', sand: '#f2e4b6', grass: '#dcebba', scrub: '#d0e3b0', scree: '#ddd5c5', forest: '#b6d79e', farm: '#d9ecaf',
                 reserve: '#c9e5bd', reserveLine: '#86b87b', reserveText: '#3f7d3f' },
@@ -78,7 +71,6 @@
                 reserve: '#14291f', reserveLine: '#2c5a3d', reserveText: '#6fae82' }
   };
 
-  // Parks, grounds, stations, peaks (zoom 11-16)
   var ZONE = {
     standard: { park: '#c8facc', garden: '#cdebb0', pitch: '#aae0cb', sport: '#dffce2', edu: '#f0eecb', hosp: '#f2ddd7', market: '#e8dccd', airport: '#e1e0ea', edge: '#9fae98',
                 parkText: '#2f7a3f', eduText: '#6b5a1f', airportText: '#5a5a8a', peak: '#8a5a3c', stRail: '#b8383b', stMetro: '#2b6cb0', stText: '#8f2a2d' },
@@ -88,7 +80,6 @@
                 parkText: '#6fae82', eduText: '#b3a46a', airportText: '#8e8ec0', peak: '#b08a6a', stRail: '#e07a7d', stMetro: '#6aa4e0', stText: '#e29a9c' }
   };
 
-  // OSM-carto-like colours by feature type (used by the "standard" theme only)
   var LANDUSE_COLORS = ['residential', '#e0dfdf', 'commercial', '#f2dad9', 'retail', '#ffd6d1', 'industrial', '#ebdbe8', 'railway', '#ebdbe8',
     'cemetery', '#aacbaf', 'farmland', '#eef0d5', 'farmyard', '#eef0d5', 'orchard', '#aedfa3', 'vineyard', '#aedfa3', 'allotments', '#c9e1bf',
     'grass', '#cdebb0', 'meadow', '#cdebb0', 'recreation_ground', '#dffce2', 'village_green', '#cdebb0', 'forest', '#add19e',
@@ -105,15 +96,14 @@
     path: ['footway', 'path', 'pedestrian', 'steps', 'cycleway', 'bridleway', 'corridor'],
     track: ['track']
   };
-  // [width at z13, z16, z19] of the road fill; casing is derived from it
-  var ROAD_ORDER = ['service', 'minor', 'tertiary', 'secondary', 'primary', 'motorway']; // draw order: minor first
+  var ROAD_ORDER = ['service', 'minor', 'tertiary', 'secondary', 'primary', 'motorway'];
   var ROAD_W = { motorway: [2.6, 9, 36], primary: [2.2, 8, 32], secondary: [2, 7, 28], tertiary: [1.7, 6, 24], minor: [1.2, 4.6, 20], service: [0.6, 2.6, 11] };
-  var FONT = ['Noto Sans Regular']; // glyphs are served by Martin from map_work/fonts
+  var FONT = ['Noto Sans Regular'];
   var tilesBase = location.origin + '/tiles/';
 
   var state = {
     theme: store.get('theme', 'standard'),
-    ov: { buildings: true, poi: true, boundaries: true, labels: true, transit: true, notes: false }
+    ov: { buildings: true, poi: true, boundaries: true, labels: true, metro: false, bus: false, tram: false, train: false, notes: false, traces: false }
   };
   if (!THEMES[state.theme]) state.theme = 'standard';
   try { var sv = JSON.parse(store.get('overlays', '')); if (sv) Object.keys(state.ov).forEach(function (k) { if (typeof sv[k] === 'boolean') state.ov[k] = sv[k]; }); } catch (e) {}
@@ -134,7 +124,6 @@
     var ALL_ROADS = [].concat.apply([], Object.keys(ROAD_GROUPS).map(function (k) { return ROAD_GROUPS[k]; }));
     function hwFilter(g) {
       var inG = ['in', hw, ['literal', ROAD_GROUPS[g]]];
-      // "minor" also catches features without a class (tiles from the old basemap_tiles)
       return g === 'minor' ? ['any', inG, ['!', ['in', hw, ['literal', ALL_ROADS]]]] : inG;
     }
     var ROAD_LAYER = { type: 'line', source: 'base', 'source-layer': 'highway' };
@@ -166,7 +155,6 @@
       ['has', 'tourism'], '#0092da',
       ['has', 'leisure'], '#2e9e4a',
       c.poi];
-    // POI icons (Maki, CC0, self-hosted in /icons). Rules are checked top to bottom; no match = plain coloured dot.
     var shp = ['coalesce', ['get', 'shop'], ''];
     var tour = ['coalesce', ['get', 'tourism'], ''];
     var leis = ['coalesce', ['get', 'leisure'], ''];
@@ -222,10 +210,13 @@
     poiIconExpr.push('');
     var landuseFill = c.typed ? ['match', ['coalesce', ['get', 'landuse'], '']].concat(LANDUSE_COLORS, [c.landuse]) : c.landuse;
     var vegFill = c.typed ? ['match', ['coalesce', ['get', 'natural'], ['get', 'wood'], ['get', 'landuse'], '']].concat(VEG_COLORS, [c.veg]) : c.veg;
-    // Label text by interface language: uz = Latin (Cyrillic names transliterated by names.sql), en = name:en first, ru = original (mahallas: name_ru)
     var NAMEX = { uz: ['coalesce', ['get', 'name_lat'], ['get', 'name'], ['get', 'name_en']],
                   en: ['coalesce', ['get', 'name_en'], ['get', 'name_lat'], ['get', 'name']],
                   ru: ['coalesce', ['get', 'name_ru'], ['get', 'name'], ['get', 'name_en']] }[I18N.get()] || ['get', 'name'];
+    var ROUTE_TYPES = { metro: ['subway', 'light_rail'], bus: ['bus', 'trolleybus'], tram: ['tram'], train: ['train'] };
+    var routes = [];
+    Object.keys(ROUTE_TYPES).forEach(function (k) { if (ov[k]) routes = routes.concat(ROUTE_TYPES[k]); });
+    var routeFilter = ['in', ['get', 'route'], ['literal', routes]];
     var label = function (id, layer, minzoom, extra) {
       var o = {
         id: id, type: 'symbol', source: 'base', 'source-layer': layer, minzoom: minzoom, filter: ['has', 'name'],
@@ -234,8 +225,6 @@
       };
       return o;
     };
-    // ── Overview layers (source "ovr" = Martin overview_tiles): big water + urban areas at small zoom,
-    //    and labels that appear step by step: country → regions → districts, cities → towns → villages → hamlets
     var FONT_B = ['Noto Sans SemiBold'];
     var nm = NAMEX;
     function zs(a) { return ['interpolate', ['linear'], ['zoom']].concat(a); }
@@ -335,7 +324,6 @@
       ovLabel('label-village', 'place', pl('village'), 11, null, { layout: Object.assign({ 'text-size': zs([11, 9.5, 14, 12]) }, placeSort), paint: { 'text-opacity': 0.9 } }),
       ovLabel('label-hamlet', 'place', pl('hamlet'), 13, null, { layout: Object.assign({ 'text-size': zs([13, 9, 16, 11]) }, placeSort), paint: { 'text-opacity': 0.75 } }),
       ovLabel('label-locality', 'place', pl('locality'), 14, null, { layout: { 'text-size': 9.5 }, paint: { 'text-opacity': 0.6 } }),
-      // last in the list = placed first by the collision engine, so the country name always wins at small zoom
       ovLabel('label-country', 'admin', lvl([2]), 3, 7, { layout: { 'text-font': FONT_B, 'text-size': zs([3, 11, 6, 18]), 'text-transform': 'uppercase', 'text-letter-spacing': 0.2 }, paint: { 'text-opacity': 0.55 } })
     ]);
     var layers = [{ id: 'bg', type: 'background', paint: { 'background-color': L.out } }]
@@ -354,26 +342,26 @@
           layout: Object.assign({ 'icon-image': poiIconExpr, 'icon-size': zs([16, 0.95, 19, 1.3]), 'icon-padding': 3, 'symbol-sort-key': ['case', ['has', 'name'], 0, 1] }, vis(ov.poi)) },
         { id: 'parking-icon', type: 'symbol', source: 'base', 'source-layer': 'parking', minzoom: 17,
           layout: Object.assign({ 'icon-image': 'maki:parking:0066ff', 'icon-size': zs([17, 0.95, 19, 1.3]) }, vis(ov.poi)) },
-        { id: 'label-housenumber', type: 'symbol', source: 'base', 'source-layer': 'building', minzoom: 17, filter: ['all', ['has', 'housenumber'], ['!', ['has', 'name']]],
+        { id: 'label-housenumber', type: 'symbol', source: 'base', 'source-layer': 'building_label', minzoom: 17, filter: ['all', ['has', 'housenumber'], ['!', ['has', 'name']]],
           layout: Object.assign({ 'text-field': ['get', 'housenumber'], 'text-font': FONT, 'text-size': zs([17, 9, 19, 12]), 'text-max-width': 5 }, lblVis),
           paint: { 'text-color': c.typed ? '#7d6b5f' : c.text, 'text-opacity': 0.85, 'text-halo-color': c.bFill, 'text-halo-width': 1 } },
         { id: 'label-address', type: 'symbol', source: 'base', 'source-layer': 'address', minzoom: 17,
           layout: Object.assign({ 'text-field': ['coalesce', NAMEX, ['get', 'housenumber']], 'text-font': FONT, 'text-size': zs([17, 9, 19, 12]), 'text-max-width': 6 }, lblVis),
           paint: { 'text-color': c.typed ? '#7d6b5f' : c.text, 'text-halo-color': c.halo, 'text-halo-width': 1.2 } },
-        { id: 'transit-route', type: 'line', source: 'ovr', 'source-layer': 'transit_route', minzoom: 10,
-          layout: Object.assign({ 'line-cap': 'round', 'line-join': 'round' }, vis(ov.transit)),
+        { id: 'transit-route', type: 'line', source: 'ovr', 'source-layer': 'transit_route', minzoom: 10, filter: routeFilter,
+          layout: Object.assign({ 'line-cap': 'round', 'line-join': 'round' }, vis(routes.length)),
           paint: { 'line-color': ['match', ['get', 'route'], 'subway', '#2563eb', 'tram', '#dc2626', 'trolleybus', '#16a34a', 'bus', '#f59e0b', 'train', '#6b7280', '#8b5cf6'],
             'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1, 14, 2.5, 18, 5], 'line-opacity': 0.75 } },
-        { id: 'transit-route-ref', type: 'symbol', source: 'ovr', 'source-layer': 'transit_route', minzoom: 13, filter: ['has', 'ref'],
-          layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['get', 'ref'], 'text-font': FONT, 'text-size': 10, 'symbol-spacing': 400 }, vis(ov.transit)),
+        { id: 'transit-route-ref', type: 'symbol', source: 'ovr', 'source-layer': 'transit_route', minzoom: 13, filter: ['all', ['has', 'ref'], routeFilter],
+          layout: Object.assign({ 'symbol-placement': 'line', 'text-field': ['get', 'ref'], 'text-font': FONT, 'text-size': 10, 'symbol-spacing': 400 }, vis(routes.length)),
           paint: { 'text-color': c.text, 'text-halo-color': c.halo, 'text-halo-width': 1.5 } },
         { id: 'transit-stop', type: 'symbol', source: 'ovr', 'source-layer': 'transit', minzoom: 15, filter: ['==', ['get', 'kind'], 'stop'],
           layout: Object.assign({ 'icon-image': 'maki:bus:0066ff', 'icon-size': zs([16, 0.8, 19, 1.1]), 'icon-padding': 4, 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 10,
-            'text-anchor': 'top', 'text-offset': [0, 1.1], 'text-optional': true, 'text-max-width': 7 }, vis(ov.transit)),
+            'text-anchor': 'top', 'text-offset': [0, 1.1], 'text-optional': true, 'text-max-width': 7 }, vis(ov.bus || ov.tram)),
           paint: { 'text-color': '#0066ff', 'text-halo-color': c.halo, 'text-halo-width': 1.2 } },
         { id: 'transit-metro', type: 'symbol', source: 'ovr', 'source-layer': 'transit', minzoom: 16, filter: ['==', ['get', 'kind'], 'metro'],
           layout: Object.assign({ 'icon-image': 'maki:rail-metro:2b6cb0', 'icon-size': zs([16, 0.95, 19, 1.3]), 'icon-allow-overlap': true, 'text-field': ['get', 'name'], 'text-font': FONT, 'text-size': 10.5,
-            'text-anchor': 'top', 'text-offset': [0, 1.2], 'text-optional': true, 'text-max-width': 7 }, vis(ov.transit)),
+            'text-anchor': 'top', 'text-offset': [0, 1.2], 'text-optional': true, 'text-max-width': 7 }, vis(ov.metro)),
           paint: { 'text-color': '#2b6cb0', 'text-halo-color': c.halo, 'text-halo-width': 1.3 } },
         { id: 'transit-crossing', type: 'circle', source: 'ovr', 'source-layer': 'transit', minzoom: 18, filter: ['==', ['get', 'kind'], 'crossing'],
           paint: { 'circle-color': c.text, 'circle-opacity': 0.55, 'circle-radius': 2 } },
@@ -389,10 +377,9 @@
           layout: Object.assign({ 'symbol-placement': 'line', 'text-field': NAMEX, 'text-font': FONT, 'text-size': 10, 'symbol-spacing': 300 }, lblVis),
           paint: { 'text-color': c.waterText, 'text-halo-color': c.halo, 'text-halo-width': 1.2 } },
         label('label-highway', 'highway', 14, { layout: { 'symbol-placement': 'line', 'text-size': 11, 'symbol-spacing': 280, 'text-max-angle': 30 } }),
-        label('label-building', 'building', 17, { layout: { 'text-size': 10 }, paint: { 'text-opacity': 0.85 } }),
+        label('label-building', 'building_label', 17, { layout: { 'text-size': 10 }, paint: { 'text-opacity': 0.85 } }),
         { id: 'bnd6', type: 'line', source: 'bnd6', 'source-layer': 'boundary_polygon_lvl6', minzoom: 8, layout: vis(ov.boundaries), paint: { 'line-color': c.border, 'line-opacity': 0.5, 'line-width': 0.8, 'line-dasharray': [1, 2] } },
         { id: 'bnd8', type: 'line', source: 'bnd8', 'source-layer': 'boundary_polygon_lvl8', minzoom: 11, layout: vis(ov.boundaries), paint: { 'line-color': c.border, 'line-opacity': 0.4, 'line-width': 0.8, 'line-dasharray': [1, 2] } },
-        // quarters (kvartal / mavze): dashed outline from z14, name from z15 (the mahalla point labels above win when both overlap)
         { id: 'quarter-line', type: 'line', source: 'base', 'source-layer': 'landuse', minzoom: 14, filter: ['all', ['==', ['get', 'landuse'], 'residential'], ['has', 'name']],
           layout: vis(ov.boundaries), paint: { 'line-color': c.typed ? '#b59a7a' : c.border, 'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.8, 17, 1.6], 'line-dasharray': [3, 2], 'line-opacity': 0.8 } },
         { id: 'label-quarter', type: 'symbol', source: 'base', 'source-layer': 'landuse', minzoom: 15, filter: ['all', ['==', ['get', 'landuse'], 'residential'], ['has', 'name']],
@@ -421,13 +408,11 @@
     attributionControl: false, maxZoom: 21, dragRotate: false, pitchWithRotate: false
   });
   map.touchZoomRotate.disableRotation();
-  // One-way arrow icon, drawn on demand in the current theme's text colour
   var SVG_CACHE = {};
   function loadSvg(name) {
     if (!SVG_CACHE[name]) SVG_CACHE[name] = fetch('/icons/' + name + '.svg').then(function (r) { return r.text(); });
     return SVG_CACHE[name];
   }
-  // id = "maki:<icon>:<hex colour>": white disc + tinted glyph, drawn at 2x for sharp rendering
   function addMakiIcon(id) {
     var parts = id.split(':'), name = parts[1], colour = '#' + parts[2];
     loadSvg(name).then(function (svg) {
@@ -463,14 +448,12 @@
   });
   map.on('error', function (e) { console.error('map:', e && e.error && e.error.message, e && e.sourceId || ''); });
 
-  // Scale bars (metric on top, imperial below), like OSM
   var scales = document.getElementById('scales');
   ['metric', 'imperial'].forEach(function (u) {
     var s = new maplibregl.ScaleControl({ unit: u, maxWidth: 110 });
     scales.appendChild(s.onAdd(map));
   });
 
-  // ── Position sync: address bar + Edit buttons ───────────────────────────
   var editLink = document.getElementById('edit-link');
   var editId = document.getElementById('edit-id');
   var hashTimer;
@@ -491,7 +474,6 @@
     map.jumpTo({ center: [v.lon, v.lat], zoom: v.zoom });
   });
 
-  // ── Toast / markers ─────────────────────────────────────────────────────
   var toastEl = document.getElementById('toast'), toastTimer;
   function toast(msg) {
     toastEl.textContent = msg; toastEl.hidden = false;
@@ -506,7 +488,6 @@
   function setMarker(lon, lat) {
     if (marker) marker.remove();
     marker = new maplibregl.Marker({ element: pinEl(), anchor: 'bottom', draggable: true }).setLngLat([lon, lat]).addTo(map);
-    // press and hold the pin, then move it: the share link follows the new place
     marker.on('dragend', function () {
       var p = marker.getLngLat();
       toast(p.lat.toFixed(6) + ', ' + p.lng.toFixed(6));
@@ -515,14 +496,12 @@
   }
   if (qs.has('mlat') && qs.has('mlon') && isFinite(+qs.get('mlat')) && isFinite(+qs.get('mlon'))) setMarker(+qs.get('mlon'), +qs.get('mlat'));
 
-  // ── Feature query ───────────────────────────────────────────────────────
   var QUERY_LAYERS = ['poi', 'poi-icon', 'building-fill'].concat(ROAD_ORDER.map(function (g) { return 'hw-' + g; }), ['hw-path', 'hw-track', 'railway', 'water-fill', 'vegetation-fill', 'landuse-fill', 'parking-fill']);
   function featureAt(pt, r) {
     var live = QUERY_LAYERS.filter(function (id) { return map.getLayer(id); });
     if (!live.length) return null;
     var f = map.queryRenderedFeatures([[pt.x - r, pt.y - r], [pt.x + r, pt.y + r]], { layers: live });
     if (!f.length) return null;
-    // a point of interest beats the building / road / area under it, even when that area is drawn on top
     var rank = { poi: 0, building: 1, highway: 2 };
     f.sort(function (x, y) { return (rank[x.sourceLayer] === undefined ? 9 : rank[x.sourceLayer]) - (rank[y.sourceLayer] === undefined ? 9 : rank[y.sourceLayer]); });
     return f[0];
@@ -533,7 +512,6 @@
     return '<dl class="kv"><dt>' + t('layer') + '</dt><dd>' + esc(f.sourceLayer) + '</dd>' +
       (p.name ? '<dt>' + t('name') + '</dt><dd>' + esc(p.name) + '</dd>' : '') + '</dl>';
   }
-  // Full record from the database (GET /api/feature/); the tiles only carry a few properties
   var DETAIL_LAYERS = { building: 1, poi: 1, highway: 1 };
   function loadDetails(arg) {
     if (!DETAIL_LAYERS[arg.f.sourceLayer]) return;
@@ -563,10 +541,7 @@
   });
   map.on('mousemove', function (e) { map.getCanvas().style.cursor = featureAt(e.point, 3) ? 'pointer' : ''; });
 
-  // ── Side panels ─────────────────────────────────────────────────────────
   var sidebar = document.getElementById('sidebar');
-  // Space the side panel takes away from the map: a column on the left on desktops, a bottom sheet (55% of the height) on phones.
-  // fitBounds uses it so a route / quarter is never hidden behind the panel.
   function mapPadding() {
     var open = !sidebar.hidden;
     if (window.innerWidth <= 640) return { top: 150, bottom: open ? Math.round(window.innerHeight * 0.55) + 30 : 60, left: 30, right: 70 };
@@ -576,16 +551,12 @@
   var sideBody = document.getElementById('side-body');
   var current = null, currentArg = null;
 
-  function soon(titleKey) {
-    return { title: t(titleKey), html: '<div class="soon"><span class="badge">' + t('soon') + '</span><p>' + t('soonText') + '</p></div>' };
-  }
   function simple(titleKey, textKey) { return { title: t(titleKey), html: '<p>' + t(textKey) + '</p>' }; }
 
   function field(id, value) {
     return '<div class="field"><input id="' + id + '" readonly value="' + esc(value) + '"><button type="button" data-copy="' + id + '">' + t('copy') + '</button></div>';
   }
 
-  // ── History: closed changesets from GET /api/history/ ──────────────────
   var hist = { items: [], loaded: false, loading: false, more: false, error: false };
   function ago(iso) {
     var sec = Math.round((new Date(iso) - Date.now()) / 1000), abs = Math.abs(sec);
@@ -615,7 +586,6 @@
     if (e.target.closest('[data-hist-more]')) loadHistory();
   });
 
-  // ── Contact details of an object (osm_object_details; text comes from OSM, so it is escaped and links are checked) ──
   function safeUrl(u) {
     u = String(u || '').trim();
     if (!u) return '';
@@ -628,7 +598,6 @@
       return digits.length >= 5 ? '<a href="tel:' + esc(digits) + '">' + esc(p.trim()) + '</a>' : esc(p.trim());
     }).filter(Boolean).join('<br>');
   }
-  // opening_hours subset: "24/7", "Mo-Fr 09:00-18:00; Sa 10:00-14:00", "off"; anything else -> null (no open/closed badge)
   var DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
   function openNow(spec, now) {
     spec = String(spec || '').trim();
@@ -648,7 +617,7 @@
         var t2 = /(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})/.exec(ranges[j]);
         if (!t2) return null;
         var a = +t2[1] * 60 + +t2[2], b = +t2[3] * 60 + +t2[4];
-        if (b <= a) b += 1440;                      // 22:00-02:00 runs past midnight
+        if (b <= a) b += 1440;
         if ((mins >= a && mins < b) || (mins + 1440 >= a && mins + 1440 < b)) on = true;
       }
       result = on;
@@ -659,14 +628,14 @@
     var out = [], parts = txt.replace(/\s/g, '').split(',');
     for (var i = 0; i < parts.length; i++) {
       var r = parts[i].split('-'), a = DAYS.indexOf(r[0]), b = r.length > 1 ? DAYS.indexOf(r[1]) : a;
-      if (a < 0 || b < 0) return null;               // holidays (PH), weeks, months ... are not understood
+      if (a < 0 || b < 0) return null;
       for (var d = a; ; d = (d + 1) % 7) { out.push(d); if (d === b) break; }
     }
     return out;
   }
   function contactRows(c, row) {
     var html = '', human = function (v) { v = String(v).replace(/_/g, ' '); return v.charAt(0).toUpperCase() + v.slice(1); };
-    var rawRow = function (k, v) { return v ? '<dt>' + t(k) + '</dt><dd>' + v + '</dd>' : ''; };   // v is already escaped HTML
+    var rawRow = function (k, v) { return v ? '<dt>' + t(k) + '</dt><dd>' + v + '</dd>' : ''; };
     var phones = [c.phone, c.mobile].filter(Boolean).join(';');
     html += rawRow('c_phone', phones ? telLinks(phones) : '');
     if (c.opening_hours) {
@@ -691,7 +660,6 @@
     return html;
   }
 
-  // ── Directions: OSRM through /route/ (car) ───────────────────────────────
   var dirs = { from: null, to: null, via: [], picking: null, route: null, busy: false, error: '', seq: 0 };
   var MAX_VIA = 5, viaMarkers = [], viaDrag = null, viaGhost = null, viaJustDragged = false;
   var dirMarkers = {};
@@ -701,14 +669,11 @@
   function ensureRouteLayers() {
     if (!map.getSource('route')) map.addSource('route', { type: 'geojson', data: dirs.route ? dirs.route.geometry : EMPTY_FC });
     if (!map.getLayer('route-casing')) map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 } });
-    // invisible fat copy of the line: a finger or a mouse can grab it without aiming at 5 pixels
     if (!map.getLayer('route-hit')) map.addLayer({ id: 'route-hit', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000000', 'line-width': 22, 'line-opacity': 0 } });
     if (!map.getLayer('route-line')) map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2563eb', 'line-width': 5 } });
   }
-  // setStyle() (theme / overlay switch) wipes our layers: put them back
   map.on('styledata', function () { if (dirs.route && !map.getSource('route') && map.isStyleLoaded()) ensureRouteLayers(); });
 
-  // Press the route line, move, release: a via point is added where you let go (the leg you grabbed decides its place in the order)
   function legAt(ll) {
     var best = 0, bestD = Infinity;
     dirs.route.legs.forEach(function (pts, i) {
@@ -719,8 +684,8 @@
   function startViaDrag(e) {
     if (!dirs.route || dirs.via.length >= MAX_VIA || notes.placing || dirs.picking) return;
     var t0 = e.originalEvent && e.originalEvent.target;
-    if (t0 && t0.closest && t0.closest('.maplibregl-marker')) return;   // the press is on a marker (A, B, a via point): that marker handles its own drag
-    e.preventDefault();                                    // no map panning while the line is being dragged
+    if (t0 && t0.closest && t0.closest('.maplibregl-marker')) return;
+    e.preventDefault();
     viaDrag = { leg: legAt(e.lngLat), from: e.point, last: e.point };
     viaGhost = new maplibregl.Marker({ element: viaDot() }).setLngLat(e.lngLat).addTo(map);
     map.getCanvas().style.cursor = 'grabbing';
@@ -730,7 +695,7 @@
     if (!viaDrag) return;
     var ll = viaGhost.getLngLat(), d = viaDrag, moved = Math.hypot(d.last.x - d.from.x, d.last.y - d.from.y) > 6;
     viaGhost.remove(); viaGhost = null; viaDrag = null; map.getCanvas().style.cursor = '';
-    viaJustDragged = true; setTimeout(function () { viaJustDragged = false; }, 300);   // the release also sends a map click: ignore it
+    viaJustDragged = true; setTimeout(function () { viaJustDragged = false; }, 300);
     if (!moved) return;
     dirs.via.splice(d.leg, 0, { lon: ll.lng, lat: ll.lat });
     drawViaMarkers(); calcRoute(true);
@@ -751,7 +716,7 @@
       if (!pt) { if (m) { m.remove(); delete dirMarkers[p[0]]; } return; }
       if (!m) {
         m = dirMarkers[p[0]] = new maplibregl.Marker({ element: pinDot(p[1], p[0]), draggable: true });
-        m.on('dragend', function () { var ll = m.getLngLat(); setPoint(p[0], ll.lng, ll.lat); });   // new place -> new route
+        m.on('dragend', function () { var ll = m.getLngLat(); setPoint(p[0], ll.lng, ll.lat); });
       }
       m.setLngLat([pt.lon, pt.lat]).addTo(map);
     });
@@ -761,8 +726,7 @@
     viaMarkers.forEach(function (m) { m.remove(); });
     viaMarkers = dirs.via.map(function (v, i) {
       var el2 = viaDot(), m = new maplibregl.Marker({ element: el2, draggable: true }).setLngLat([v.lon, v.lat]).addTo(map);
-      m.on('dragend', function () { var ll = m.getLngLat(); dirs.via[i] = { lon: ll.lng, lat: ll.lat }; calcRoute(true); });   // moved: new route, same view
-      // a tap (pressed and released in place, without dragging) removes it; 'click' is not reliable on a draggable marker
+      m.on('dragend', function () { var ll = m.getLngLat(); dirs.via[i] = { lon: ll.lng, lat: ll.lat }; calcRoute(true); });
       var down = null, dragged = false;
       m.on('dragstart', function () { dragged = true; });
       el2.addEventListener('pointerdown', function (ev) { down = { x: ev.clientX, y: ev.clientY }; dragged = false; });
@@ -818,13 +782,13 @@
         var steps = [];
         rt.legs.forEach(function (leg, i) {
           leg.steps.forEach(function (st, j) {
-            if (i > 0 && j === 0) return;                                                              // the "depart" of a later leg is the via point itself
+            if (i > 0 && j === 0) return;
             if (i < rt.legs.length - 1 && j === leg.steps.length - 1) st = Object.assign({}, st, { maneuver: Object.assign({}, st.maneuver, { type: 'via' }) });
             steps.push(st);
           });
         });
         dirs.route = { geometry: rt.geometry, distance: rt.distance, duration: rt.duration, steps: steps,
-          legs: rt.legs.map(function (l) { return [].concat.apply([], l.steps.map(function (st) { return st.geometry.coordinates; })); }) };   // points of every leg, to tell which one a drag starts on
+          legs: rt.legs.map(function (l) { return [].concat.apply([], l.steps.map(function (st) { return st.geometry.coordinates; })); }) };
         ensureRouteLayers(); map.getSource('route').setData(rt.geometry);
         if (!keepView) {
           var first = rt.geometry.coordinates[0];
@@ -895,8 +859,7 @@
     if (to) { var d = JSON.parse(to.dataset.dirTo); openPanel('directions'); setPoint('to', d.lon, d.lat, d.label); }
   });
 
-  // ── Map notes: "something is wrong here" (GET/POST /api/notes/) ──────────────
-  var account = null;   // the logged-in user, filled in by the account chip at the bottom of this file
+  var account = null;
   var notes = { list: [], mode: 'intro', draft: null, draftText: '', commentText: '', detail: null, busy: false, error: '', placing: false };
   var draftMarker = null, notesTimer;
 
@@ -931,7 +894,7 @@
     if (!state.ov.notes || map.getZoom() < 10) { if (notes.list.length) { notes.list = []; refreshNotes(); } return; }
     notesTimer = setTimeout(function () {
       var c = map.getCenter(), b = map.getBounds();
-      var hw = Math.min((b.getEast() - b.getWest()) / 2, 1), hh = Math.min((b.getNorth() - b.getSouth()) / 2, 1);   // the server accepts at most 2 degrees
+      var hw = Math.min((b.getEast() - b.getWest()) / 2, 1), hh = Math.min((b.getNorth() - b.getSouth()) / 2, 1);
       var box = [c.lng - hw, c.lat - hh, c.lng + hw, c.lat + hh].map(function (v) { return v.toFixed(5); }).join(',');
       notesApi('GET', '?bbox=' + box).then(function (res) { if (res.status === 200) { notes.list = res.body.notes; refreshNotes(); } });
     }, 300);
@@ -943,7 +906,6 @@
     loadNotes();
   }
   map.on('moveend', loadNotes);
-  // setStyle() (theme / overlay switch) wipes our layers: put them back and refill them
   map.on('styledata', function () { if (!map.getSource('notes') && map.isStyleLoaded()) { ensureNoteLayers(); loadNotes(); } });
 
   function dropDraft() { if (draftMarker) { draftMarker.remove(); draftMarker = null; } notes.draft = null; notes.placing = false; map.getCanvas().style.cursor = ''; }
@@ -1041,6 +1003,300 @@
       '<p class="muted">' + esc(t('n_fix')) + '</p>' };
   }
 
+  var traces = { mine: [], loaded: false, loading: false, busy: false, public: [] };
+  var tracesTimer;
+  var TRACE_ERRORS = { login_required: 'tr_login', no_file: 'tr_noFile', file_too_big: 'tr_big', gpx_invalid: 'tr_invalid', gpx_unsafe: 'tr_invalid', gpx_no_track: 'tr_noTrack',
+    gpx_too_many_points: 'tr_tooMany', out_of_area: 'tr_far', too_many_traces: 'tr_limit', too_many_requests: 'tr_rate', rate_limited: 'tr_rate', name_required: 'tr_nameReq' };
+
+  function tracesApi(method, path, body, isForm) {
+    var headers = {};
+    if (method !== 'GET') headers['X-CSRFToken'] = csrfToken();
+    if (body && !isForm) headers['Content-Type'] = 'application/json';
+    return fetch('/api/traces/' + path, { method: method, credentials: 'same-origin', headers: headers, body: body ? (isForm ? body : JSON.stringify(body)) : undefined })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }, function () { return { status: r.status, body: {} }; }); })
+      .catch(function () { return { status: 0, body: {} }; });
+  }
+  function traceError(res) { return TRACE_ERRORS[res.body && res.body.error] || (res.status === 404 ? 'tr_gone' : 'tr_error'); }
+
+  function ensureTraceLayers() {
+    var vis = state.ov.traces ? 'visible' : 'none';
+    if (!map.getSource('traces')) map.addSource('traces', { type: 'geojson', data: { type: 'FeatureCollection', features: traces.public } });
+    if (!map.getSource('trace-focus')) map.addSource('trace-focus', { type: 'geojson', data: EMPTY_FC });
+    if (!map.getLayer('traces-public')) map.addLayer({ id: 'traces-public', type: 'line', source: 'traces', layout: { visibility: vis, 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#9333ea', 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.5, 16, 4], 'line-opacity': 0.75 } });
+    if (!map.getLayer('trace-focus-casing')) map.addLayer({ id: 'trace-focus-casing', type: 'line', source: 'trace-focus', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 8, 'line-opacity': 0.9 } });
+    if (!map.getLayer('trace-focus-line')) map.addLayer({ id: 'trace-focus-line', type: 'line', source: 'trace-focus', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ea580c', 'line-width': 4.5 } });
+  }
+  function loadPublicTraces() {
+    clearTimeout(tracesTimer);
+    if (!state.ov.traces || map.getZoom() < 9) { if (traces.public.length) { traces.public = []; ensureTraceLayers(); map.getSource('traces').setData({ type: 'FeatureCollection', features: [] }); } return; }
+    tracesTimer = setTimeout(function () {
+      var c = map.getCenter(), b = map.getBounds();
+      var hw = Math.min((b.getEast() - b.getWest()) / 2, 1), hh = Math.min((b.getNorth() - b.getSouth()) / 2, 1);
+      var box = [c.lng - hw, c.lat - hh, c.lng + hw, c.lat + hh].map(function (v) { return v.toFixed(5); }).join(',');
+      tracesApi('GET', '?bbox=' + box + '&zoom=' + map.getZoom().toFixed(1)).then(function (res) {
+        if (res.status !== 200) return;
+        traces.public = res.body.features; ensureTraceLayers(); map.getSource('traces').setData(res.body);
+      });
+    }, 350);
+  }
+  function setTracesOn(on) {
+    state.ov.traces = on; store.set('overlays', JSON.stringify(state.ov));
+    ensureTraceLayers();
+    map.setLayoutProperty('traces-public', 'visibility', on ? 'visible' : 'none');
+    loadPublicTraces();
+  }
+  map.on('moveend', loadPublicTraces);
+  map.on('styledata', function () { if (!map.getSource('traces') && map.isStyleLoaded()) { ensureTraceLayers(); loadPublicTraces(); } });
+  map.on('mouseenter', 'traces-public', function () { if (!viaDrag && !notes.placing) map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'traces-public', function () { if (!viaDrag && !notes.placing) map.getCanvas().style.cursor = ''; });
+
+  function traceMsg(key, bad) {
+    var box = el('tr-msg'); if (!box) return;
+    box.className = bad ? 'note-error' : 'muted'; box.textContent = key ? t(key) : '';
+  }
+  function traceKm(m) { return (m / 1000).toFixed(m >= 10000 ? 0 : 1) + ' ' + t('d_km'); }
+  function renderTraceList() {
+    var box = el('tr-list'); if (!box) return;
+    if (traces.loading) { box.innerHTML = '<p class="muted">' + esc(t('n_loading')) + '</p>'; return; }
+    if (!traces.mine.length) { box.innerHTML = '<p class="muted">' + esc(t('tr_none')) + '</p>'; return; }
+    box.innerHTML = traces.mine.map(function (tr) {
+      var pub = tr.visibility === 'public';
+      return '<article class="tr-item" data-id="' + tr.id + '"><h4>' + esc(tr.name) + '</h4>' +
+        '<div class="meta">' + esc(new Date(tr.uploaded_at).toLocaleDateString(I18N.get())) + ' · ' + esc(traceKm(tr.length_m)) + ' · ' + tr.points + ' ' + esc(t('tr_points')) +
+        ' · <span class="state ' + (pub ? 'on' : 'off') + '">' + esc(t(pub ? 'tr_public' : 'tr_private')) + '</span></div>' +
+        (tr.description ? '<p class="desc">' + esc(tr.description) + '</p>' : '') +
+        '<div class="btn-row"><button type="button" class="btn" data-tr-show="' + tr.id + '">' + esc(t('h_show')) + '</button>' +
+        '<a class="btn" href="/api/traces/' + tr.id + '/gpx/" download>GPX</a>' +
+        '<button type="button" class="btn" data-tr-vis="' + tr.id + '">' + esc(t(pub ? 'tr_makePrivate' : 'tr_makePublic')) + '</button>' +
+        '<button type="button" class="btn" data-tr-del="' + tr.id + '">' + esc(t('tr_delete')) + '</button></div></article>';
+    }).join('');
+  }
+  function loadMyTraces() {
+    if (!account) return;
+    traces.loading = true; renderTraceList();
+    tracesApi('GET', '?mine=1').then(function (res) {
+      traces.loading = false; traces.loaded = true;
+      if (res.status === 200) traces.mine = res.body.traces; else traceMsg(traceError(res), true);
+      renderTraceList();
+    });
+  }
+  function showTrace(id) {
+    tracesApi('GET', id + '/').then(function (res) {
+      if (res.status !== 200) { traceMsg(traceError(res), true); return; }
+      ensureTraceLayers();
+      map.getSource('trace-focus').setData({ type: 'Feature', properties: {}, geometry: res.body.geometry });
+      var b = res.body.bbox;
+      map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: mapPadding(), maxZoom: 17, duration: 900 });
+    });
+  }
+  function uploadTrace() {
+    var file = el('tr-file') && el('tr-file').files[0];
+    if (!file) { traceMsg('tr_noFile', true); return; }
+    if (traces.busy) return;
+    var form = new FormData();
+    form.append('file', file); form.append('name', el('tr-name').value); form.append('description', el('tr-desc').value); form.append('visibility', el('tr-vis').value);
+    traces.busy = true; traceMsg('tr_uploading', false);
+    tracesApi('POST', '', form, true).then(function (res) {
+      traces.busy = false;
+      if (res.status === 201) {
+        el('tr-file').value = ''; el('tr-name').value = ''; el('tr-desc').value = '';
+        traceMsg('tr_done', false); loadMyTraces(); showTrace(res.body.id);
+        if (res.body.visibility === 'public' && state.ov.traces) loadPublicTraces();
+      } else traceMsg(traceError(res), true);
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-tr-upload],[data-tr-show],[data-tr-vis],[data-tr-del]');
+    if (!b) return;
+    if (b.dataset.trUpload) { uploadTrace(); return; }
+    if (b.dataset.trShow) { showTrace(+b.dataset.trShow); return; }
+    var tr = traces.mine.filter(function (x) { return String(x.id) === (b.dataset.trVis || b.dataset.trDel); })[0];
+    if (!tr) return;
+    if (b.dataset.trVis) {
+      tracesApi('PATCH', tr.id + '/', { visibility: tr.visibility === 'public' ? 'private' : 'public' }).then(function (res) {
+        if (res.status === 200) { Object.assign(tr, res.body); renderTraceList(); loadPublicTraces(); } else traceMsg(traceError(res), true);
+      });
+    } else if (window.confirm(t('tr_confirmDelete') + ' ' + tr.name + '?')) {
+      tracesApi('DELETE', tr.id + '/').then(function (res) {
+        if (res.status === 200) {
+          traces.mine = traces.mine.filter(function (x) { return x !== tr; }); renderTraceList();
+          ensureTraceLayers(); map.getSource('trace-focus').setData(EMPTY_FC); loadPublicTraces();
+        } else traceMsg(traceError(res), true);
+      });
+    }
+  });
+  sideBody.addEventListener('change', function (e) { if (e.target.matches('[data-trace-layer]')) setTracesOn(e.target.checked); });
+  map.on('click', 'traces-public', function (e) {
+    if (viaJustDragged || notes.placing || dirs.picking) return;
+    var p = e.features[0].properties; toast(p.name + ' · ' + p.owner + ' · ' + traceKm(p.length_m));
+  });
+  function bindTraces() {
+    if (account && !traces.loaded) loadMyTraces(); else renderTraceList();
+  }
+  function tracesPanel() {
+    var layer = '<label class="check"><input type="checkbox" data-trace-layer="1"' + (state.ov.traces ? ' checked' : '') + '>' + esc(t('tr_layer')) + '</label>';
+    if (!account) {
+      return { title: t('traces'), html: '<p>' + esc(t('tr_intro')) + '</p>' + layer + '<p class="muted">' + esc(t('tr_login')) + ' <a href="/login?next=' + encodeURIComponent(location.pathname + location.search + location.hash) + '">' + esc(t('login')) + '</a></p>' };
+    }
+    return { title: t('traces'), html: '<p>' + esc(t('tr_intro')) + '</p>' + layer +
+      '<h3>' + esc(t('tr_upload')) + '</h3>' +
+      '<input id="tr-file" class="note-box" type="file" accept=".gpx,application/gpx+xml,text/xml,application/xml">' +
+      '<input id="tr-name" class="note-box" type="text" maxlength="100" placeholder="' + esc(t('tr_namePh')) + '">' +
+      '<textarea id="tr-desc" class="note-box" rows="2" maxlength="500" placeholder="' + esc(t('tr_descPh')) + '"></textarea>' +
+      '<select id="tr-vis" class="note-box"><option value="private">' + esc(t('tr_private')) + ' — ' + esc(t('tr_privateHint')) + '</option><option value="public">' + esc(t('tr_public')) + ' — ' + esc(t('tr_publicHint')) + '</option></select>' +
+      '<p id="tr-msg" class="muted"></p><div class="btn-row"><button type="button" class="btn primary" data-tr-upload="1">' + esc(t('tr_uploadBtn')) + '</button></div>' +
+      '<h3>' + esc(t('tr_mine')) + '</h3><div id="tr-list"></div>' };
+  }
+
+  var diaries = { mode: 'list', entries: [], page: 1, more: false, loading: false, loaded: false, entry: null,
+                  draft: { id: null, title: '', body: '', lang: '', place: 'none', hadPlace: false }, comment: '', busy: false, error: '' };
+  var DIARY_ERRORS = { login_required: 'dr_login', title_too_short: 'dr_titleShort', title_too_long: 'dr_titleLong', body_too_short: 'dr_bodyShort', body_too_long: 'dr_bodyLong',
+    comment_too_short: 'dr_commentShort', comment_too_long: 'dr_commentLong', bad_point: 'n_far', out_of_area: 'n_far', too_many_requests: 'n_rate', rate_limited: 'n_rate', forbidden: 'dr_forbidden' };
+
+  function diariesApi(method, path, body) {
+    var headers = {};
+    if (method !== 'GET') headers['X-CSRFToken'] = csrfToken();
+    if (body) headers['Content-Type'] = 'application/json';
+    return fetch('/api/diaries/' + path, { method: method, credentials: 'same-origin', headers: headers, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }, function () { return { status: r.status, body: {} }; }); })
+      .catch(function () { return { status: 0, body: {} }; });
+  }
+  function diaryError(res) { return DIARY_ERRORS[res.body && res.body.error] || (res.status === 404 ? 'dr_gone' : 'dr_error'); }
+  function diaryDate(iso) { return new Date(iso).toLocaleDateString(I18N.get(), { year: 'numeric', month: 'short', day: 'numeric' }); }
+
+  function loadDiaries(more) {
+    if (diaries.loading) return;
+    diaries.loading = true; diaries.error = '';
+    var page = more ? diaries.page + 1 : 1;
+    diariesApi('GET', '?page=' + page).then(function (res) {
+      diaries.loading = false;
+      if (res.status === 200) {
+        diaries.entries = more ? diaries.entries.concat(res.body.entries) : res.body.entries; diaries.page = page; diaries.more = res.body.has_more; diaries.loaded = true;
+      } else diaries.error = diaryError(res);
+      if (current === 'diaries') render();
+    });
+    if (current === 'diaries') render();
+  }
+  function openDiary(id) {
+    diaries.mode = 'entry'; diaries.entry = null; diaries.comment = ''; diaries.error = ''; diaries.busy = true;
+    diariesApi('GET', id + '/').then(function (res) {
+      diaries.busy = false;
+      if (res.status === 200) diaries.entry = res.body; else diaries.error = diaryError(res);
+      if (current === 'diaries') render();
+    });
+    if (current === 'diaries') render(); else openPanel('diaries');
+  }
+  function composeDiary(entry) {
+    diaries.mode = 'compose'; diaries.error = '';
+    diaries.draft = entry ? { id: entry.id, title: entry.title, body: entry.body, lang: entry.language, place: entry.lat != null ? 'keep' : 'none', hadPlace: entry.lat != null }
+                          : { id: null, title: '', body: '', lang: ({ uz: 'uz', ru: 'ru', en: 'en' })[I18N.get()] || '', place: 'none', hadPlace: false };
+    render();
+  }
+  function saveDiary() {
+    var d = diaries.draft; if (diaries.busy) return;
+    var body = { title: d.title, body: d.body, language: d.lang };
+    if (d.place === 'center') { var c = map.getCenter(); body.lat = c.lat; body.lon = c.lng; } else if (d.place === 'none') { body.lat = null; body.lon = null; }
+    diaries.busy = true; diaries.error = ''; render();
+    diariesApi(d.id ? 'PATCH' : 'POST', d.id ? d.id + '/' : '', body).then(function (res) {
+      diaries.busy = false;
+      if (res.status === 200 || res.status === 201) { diaries.loaded = false; diaries.entry = res.body.comments ? res.body : null; if (diaries.entry) { diaries.mode = 'entry'; render(); } else openDiary(res.body.id); return; }
+      diaries.error = diaryError(res); render();
+    });
+  }
+  function deleteDiary() {
+    var e = diaries.entry; if (!e || !window.confirm(t('dr_confirmDelete') + ' ' + e.title + '?')) return;
+    diariesApi('DELETE', e.id + '/').then(function (res) {
+      if (res.status === 200) { diaries.mode = 'list'; diaries.entry = null; diaries.loaded = false; render(); } else { diaries.error = diaryError(res); render(); }
+    });
+  }
+  function sendComment() {
+    var e = diaries.entry; if (!e || diaries.busy) return;
+    diaries.busy = true; diaries.error = ''; render();
+    diariesApi('POST', e.id + '/comments/', { text: diaries.comment }).then(function (res) {
+      diaries.busy = false;
+      if (res.status === 201) { diaries.entry = res.body; diaries.comment = ''; diaries.loaded = false; } else diaries.error = diaryError(res);
+      render();
+    });
+  }
+  function deleteComment(id) {
+    var e = diaries.entry; if (!e || !window.confirm(t('dr_confirmDeleteComment'))) return;
+    diariesApi('DELETE', e.id + '/comments/' + id + '/').then(function (res) {
+      if (res.status === 200) { diaries.entry = res.body; diaries.loaded = false; } else diaries.error = diaryError(res);
+      render();
+    });
+  }
+  sideBody.addEventListener('input', function (e) {
+    var id = e.target.id, d = diaries.draft;
+    if (id === 'dr-title') d.title = e.target.value; else if (id === 'dr-body') d.body = e.target.value; else if (id === 'dr-lang') d.lang = e.target.value;
+    else if (id === 'dr-place') d.place = e.target.value; else if (id === 'dr-comment') diaries.comment = e.target.value;
+  });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-dr]');
+    if (!b) return;
+    var act = b.dataset.dr, id = +b.dataset.id;
+    if (act === 'open') openDiary(id);
+    else if (act === 'new') composeDiary(null);
+    else if (act === 'edit') composeDiary(diaries.entry);
+    else if (act === 'back') { diaries.mode = 'list'; diaries.error = ''; render(); }
+    else if (act === 'cancel') { if (diaries.draft.id && diaries.entry) { diaries.mode = 'entry'; render(); } else { diaries.mode = 'list'; render(); } }
+    else if (act === 'save') saveDiary();
+    else if (act === 'delete') deleteDiary();
+    else if (act === 'comment') sendComment();
+    else if (act === 'delcomment') deleteComment(id);
+    else if (act === 'more') loadDiaries(true);
+    else if (act === 'place') { var en = diaries.entry; if (en && en.lat != null) { map.flyTo({ center: [en.lon, en.lat], zoom: 15 }); setMarker(en.lon, en.lat); } }
+  });
+  function bindDiaries() { if (diaries.mode === 'list' && !diaries.loaded && !diaries.loading) loadDiaries(false); }
+
+  function diaryMeta(e) {
+    return esc(e.author.name) + ' · ' + esc(diaryDate(e.created_at)) + (e.language ? ' · ' + esc(e.language.toUpperCase()) : '') + ' · ' + esc(t('dr_comments')) + ': ' + e.comment_count;
+  }
+  function diariesPanel() {
+    var err = diaries.error ? '<p class="note-error">' + esc(t(diaries.error)) + '</p>' : '', busy = diaries.busy ? ' disabled' : '';
+    var loginHint = '<p class="muted">' + esc(t('dr_login')) + ' <a href="/login?next=' + encodeURIComponent(location.pathname + location.search + location.hash) + '">' + esc(t('login')) + '</a></p>';
+    var back = '<div class="btn-row" style="margin-top:0"><button type="button" class="btn" data-dr="back">&larr; ' + esc(t('diaries')) + '</button></div>';
+
+    if (diaries.mode === 'compose') {
+      var d = diaries.draft;
+      var langs = ['', 'uz', 'ru', 'en'].map(function (l) { return '<option value="' + l + '"' + (d.lang === l ? ' selected' : '') + '>' + esc(l ? l.toUpperCase() : t('dr_langAny')) + '</option>'; }).join('');
+      var places = '<option value="none"' + (d.place === 'none' ? ' selected' : '') + '>' + esc(t('dr_placeNone')) + '</option>' +
+        (d.hadPlace ? '<option value="keep"' + (d.place === 'keep' ? ' selected' : '') + '>' + esc(t('dr_placeKeep')) + '</option>' : '') +
+        '<option value="center"' + (d.place === 'center' ? ' selected' : '') + '>' + esc(t('dr_placeCenter')) + '</option>';
+      return { title: t('diaries'), html: '<input id="dr-title" class="note-box" type="text" maxlength="150" placeholder="' + esc(t('dr_titlePh')) + '" value="' + esc(d.title) + '">' +
+        '<textarea id="dr-body" class="note-box" rows="9" maxlength="20000" placeholder="' + esc(t('dr_bodyPh')) + '">' + esc(d.body) + '</textarea>' +
+        '<select id="dr-lang" class="note-box">' + langs + '</select><select id="dr-place" class="note-box">' + places + '</select>' + err +
+        '<div class="btn-row"><button type="button" class="btn primary" data-dr="save"' + busy + '>' + esc(t(d.id ? 'dr_save' : 'dr_publish')) + '</button>' +
+        '<button type="button" class="btn" data-dr="cancel">' + esc(t('n_cancel')) + '</button></div>' };
+    }
+
+    if (diaries.mode === 'entry') {
+      var en = diaries.entry;
+      if (!en) return { title: t('diaries'), html: back + (diaries.busy ? '<p class="muted">' + esc(t('n_loading')) + '</p>' : err) };
+      var mine = account && account.id === en.author.id;
+      var comments = en.comments.map(function (c) {
+        var canDel = account && (account.id === c.author.id || mine);
+        return '<article class="note-entry"><div class="meta"><b>' + esc(c.author.name) + '</b> · ' + esc(diaryDate(c.created_at)) +
+          (canDel ? ' · <a href="#" data-dr="delcomment" data-id="' + c.id + '" onclick="return false">' + esc(t('tr_delete')) + '</a>' : '') + '</div><p>' + esc(c.body) + '</p></article>';
+      }).join('');
+      return { title: t('diaries'), html: back + '<h3 class="dr-title">' + esc(en.title) + '</h3><div class="meta dr-meta">' + diaryMeta(en) + '</div>' +
+        '<div class="dr-body">' + esc(en.body) + '</div>' +
+        '<div class="btn-row">' + (en.lat != null ? '<button type="button" class="btn" data-dr="place">' + esc(t('dr_showPlace')) + '</button>' : '') +
+        (mine ? '<button type="button" class="btn" data-dr="edit">' + esc(t('dr_edit')) + '</button><button type="button" class="btn" data-dr="delete">' + esc(t('tr_delete')) + '</button>' : '') + '</div>' +
+        '<h3>' + esc(t('dr_comments')) + ' (' + en.comments.length + ')</h3>' + comments +
+        (account ? '<textarea id="dr-comment" class="note-box" rows="3" maxlength="2000" placeholder="' + esc(t('dr_commentPh')) + '">' + esc(diaries.comment) + '</textarea>' + err +
+          '<div class="btn-row"><button type="button" class="btn primary" data-dr="comment"' + busy + '>' + esc(t('n_comment')) + '</button></div>' : loginHint) };
+    }
+
+    var items = diaries.entries.map(function (e) {
+      return '<article class="dr-item" data-dr="open" data-id="' + e.id + '" tabindex="0" role="button"><h4>' + esc(e.title) + '</h4><div class="meta">' + diaryMeta(e) + '</div><p>' + esc(e.excerpt) + '</p></article>';
+    }).join('');
+    return { title: t('diaries'), html: '<p class="muted">' + esc(t('dr_intro')) + '</p>' +
+      (account ? '<div class="btn-row" style="margin-top:0"><button type="button" class="btn primary" data-dr="new">' + esc(t('dr_new')) + '</button></div>' : loginHint) + err + items +
+      (diaries.loading ? '<p class="muted">' + esc(t('n_loading')) + '</p>' : diaries.loaded && !diaries.entries.length ? '<p class="muted">' + esc(t('dr_none')) + '</p>' : '') +
+      (diaries.more && !diaries.loading ? '<div class="btn-row"><button type="button" class="btn" data-dr="more">' + esc(t('h_more')) + '</button></div>' : '') };
+  }
+
   var PANELS = {
     welcome: function () {
       return { title: t('welcomeTitle'), html:
@@ -1065,9 +1321,8 @@
       else if (hist.more) html += '<div class="btn-row"><button type="button" class="btn" data-hist-more="1">' + esc(t('h_more')) + '</button></div>';
       return { title: t('history'), html: html };
     },
-    traces: function () { return soon('traces'); },
-    diaries: function () { return soon('diaries'); },
-    communities: function () { return soon('communities'); },
+    traces: tracesPanel,
+    diaries: diariesPanel,
     note: notePanel,
     help: function () { return simple('helpTitle', 'helpText'); },
     about: function () { return simple('aboutTitle', 'aboutText'); },
@@ -1099,7 +1354,8 @@
       return { title: t('layers'), html:
         '<h3>' + t('baseMap') + '</h3><div class="choice">' +
         themeOpt('standard', 'linear-gradient(135deg,#f2efe9 55%,#aad3df 55%)') + themeOpt('light', 'linear-gradient(135deg,#f3f4f6 55%,#cfe2ee 55%)') + themeOpt('dark', 'linear-gradient(135deg,#10151b 55%,#17364a 55%)') + '</div>' +
-        '<h3>' + t('overlays') + '</h3>' + ck('buildings', 'ovBuildings') + ck('poi', 'ovPoi') + ck('boundaries', 'ovBoundaries') + ck('transit', 'ovTransit') + ck('notes', 'ovNotes') + ck('labels', 'ovLabels') };
+        '<h3>' + t('overlays') + '</h3>' + ck('buildings', 'ovBuildings') + ck('poi', 'ovPoi') + ck('boundaries', 'ovBoundaries') + ck('traces', 'ovTraces') + ck('notes', 'ovNotes') + ck('labels', 'ovLabels') +
+        '<h3>' + t('ovTransit') + '</h3>' + ck('metro', 'ovMetro') + ck('bus', 'ovBus') + ck('tram', 'ovTram') + ck('train', 'ovTrain') };
     },
     legend: function () {
       var c = THEMES[state.theme];
@@ -1150,7 +1406,7 @@
       return { title: title, html: html + '<dl class="kv"><dt>' + t('coords') + '</dt><dd>' + ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6) + '</dd></dl>' +
         '<div class="btn-row"><a class="btn primary" href="/edit/#map=19/' + ll.lat.toFixed(6) + '/' + ll.lng.toFixed(6) + (ids ? '&id=' + ids : '') + '">' + t('editThis') + '</a>' +
         '<button type="button" class="btn" data-dir-to="' + esc(JSON.stringify({ lon: ll.lng, lat: ll.lat, label: d && d.name ? d.name : ll.lat.toFixed(5) + ', ' + ll.lng.toFixed(5) })) + '">' + t('d_here') + '</button>' +
-        (d && d.osm_id ? '<a class="btn" target="_blank" rel="noopener" href="https://www.openstreetmap.org/' + esc(d.osm_type) + '/' + d.osm_id + '">' + t('d_osm') + '</a>' : '') + '</div>' };
+        (d && d.osm_id && d.source !== 'user' ? '<a class="btn" target="_blank" rel="noopener" href="https://www.openstreetmap.org/' + esc(d.osm_type) + '/' + d.osm_id + '">' + t('d_osm') + '</a>' : '') + '</div>' };
     }
   };
 
@@ -1166,9 +1422,11 @@
     sidebar.hidden = false;
     markActive(current);
     if (current === 'directions') bindDirections();
+    if (current === 'traces') bindTraces();
+    if (current === 'diaries') bindDiaries();
   }
   function openPanel(name, arg) {
-    if (current === name && name !== 'object' && !arg) { closePanel(); return; } // toggle
+    if (current === name && name !== 'object' && !arg) { closePanel(); return; }
     hideSuggest();
     current = name; currentArg = arg || null;
     render();
@@ -1181,7 +1439,6 @@
   }
   document.getElementById('side-close').onclick = closePanel;
 
-  // Delegated clicks: panel openers, copy buttons, layer controls
   document.addEventListener('click', function (e) {
     var op = e.target.closest('[data-panel]');
     if (op) { document.getElementById('nav').classList.remove('open'); openPanel(op.dataset.panel); return; }
@@ -1213,7 +1470,6 @@
     }
   });
 
-  // ── Top bar ─────────────────────────────────────────────────────────────
   document.getElementById('edit-more').onclick = function (e) { e.stopPropagation(); var m = document.getElementById('edit-menu'); m.hidden = !m.hidden; };
   document.getElementById('lang-btn').onclick = function (e) { e.stopPropagation(); var m = document.getElementById('lang-menu'); m.hidden = !m.hidden; };
   document.getElementById('burger').onclick = function (e) { e.stopPropagation(); document.getElementById('nav').classList.toggle('open'); };
@@ -1227,7 +1483,6 @@
   document.querySelectorAll('[data-lang]').forEach(function (b) { b.onclick = function () { setLang(b.dataset.lang); }; });
   langCode.textContent = I18N.get().toUpperCase();
 
-  // ── Tools ───────────────────────────────────────────────────────────────
   document.getElementById('zoom-in').onclick = function () { map.zoomIn(); };
   document.getElementById('zoom-out').onclick = function () { map.zoomOut(); };
   var meDot = null;
@@ -1245,7 +1500,6 @@
     }, function () { toast(t('geoDenied')); });
   };
 
-  // ── Search: coordinates, or places from the database (GET /api/search/) ──────────
   var form = document.getElementById('search'), q = document.getElementById('q');
   var coordRe = /^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/;
   var box = document.createElement('ul'), results = [], active = -1, searchSeq = 0, searchTimer;
@@ -1288,7 +1542,7 @@
       renderSuggest();
     }
   });
-  box.addEventListener('mousedown', function (e) {   // mousedown: fires before the input loses focus
+  box.addEventListener('mousedown', function (e) {
     var li = e.target.closest('li'); if (!li) return;
     e.preventDefault(); pick(results[+li.dataset.i]);
   });
@@ -1313,7 +1567,6 @@
   document.getElementById('where').onclick = function () { current = null; openPanel('where'); };
   document.getElementById('directions').onclick = function () { openPanel('directions'); };
 
-  // ── Account chip: login state comes from the Django session cookie (see /api/auth/) ──
   (function () {
     var guest = document.getElementById('auth-guest'), box = document.getElementById('auth-user');
     var menu = document.getElementById('user-menu');
@@ -1335,10 +1588,9 @@
       guest.hidden = true; box.hidden = false;
       document.getElementById('user-name').textContent = d.user.display_name;
       document.getElementById('user-initial').textContent = (d.user.display_name || '?').charAt(0).toUpperCase();
-    }, function () { /* offline: stay in guest mode */ });
+    }, function () { });
   })();
 
-  // ── Boot ────────────────────────────────────────────────────────────────
   renderIcons();
   I18N.apply();
   if (!store.get('welcomed', '') && !qs.has('mlat')) openPanel('welcome');

@@ -1,7 +1,3 @@
-/* Login / sign-up / forgot-password page logic. Talks to the Django cookie-session API under /api/auth/ (same origin).
-   Sign up : name + e-mail + password -> code from the e-mail (confirms the address, once) -> logged in
-   Log in  : e-mail + password (no code)
-   Forgot  : e-mail -> code + new password -> logged in */
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var t = I18N.t, f = I18N.f;
@@ -9,9 +5,8 @@
   var path = location.pathname.replace(/\/+$/, '');
   var mode = path === '/forgot' ? 'forgot' : (path === '/signup' || path === '/user/new') ? 'signup' : 'login';
   var qs = new URLSearchParams(location.search);
-  var oauth = qs.get('oauth') === '1'; // opened from the iD editor popup
+  var oauth = qs.get('oauth') === '1';
   var next = safeNext(qs.get('next'));
-  // step: 'form' | 'code'.  kind (in the code step): 'confirm' = new account, 'reset' = forgot password
   var state = { step: 'form', kind: null, email: '', info: null, error: null, secs: 0, timer: null, busy: false, pwVisible: false };
   var PW_IDS = ['password', 'password2', 'newpw', 'newpw2'];
 
@@ -28,13 +23,11 @@
     }, function () { return { status: 0, data: { error: 'network' } }; });
   }
 
-  // ── input helpers ──────────────────────────────────────────────────────
   function emailValue() { return $('email').value.trim().toLowerCase(); }
   function emailOk(e) { return e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e); }
   function nameOk(n) { return /^[\w .'’ʻ‘-]{3,30}$/.test(n); }
   function cleanName() { return $('display-name').value.replace(/\s+/g, ' ').trim(); }
 
-  // ── messages ───────────────────────────────────────────────────────────
   function showError(code, extra) { state.error = { code: code, extra: extra || {} }; renderError(); }
   function clearError() { state.error = null; renderError(); }
   function renderError() {
@@ -53,7 +46,6 @@
     el.hidden = false;
   }
 
-  // ── rendering (also re-run when the language changes) ───────────────────
   function render() {
     I18N.apply();
     $('lang-code').textContent = I18N.get().toUpperCase();
@@ -125,9 +117,8 @@
     if (step === 'code') { $('code').value = ''; $('code').focus(); }
     else $('email').focus();
   }
-  function go(data) { location.href = data.redirect || next; } // keep buttons disabled while navigating
+  function go(data) { location.href = data.redirect || next; }
 
-  // ── actions ────────────────────────────────────────────────────────────
   function afterCodeSent(kind, email, data, info) {
     state.kind = kind; state.email = email; state.info = info || null;
     $('dev-note').hidden = !data.dev_code;
@@ -148,7 +139,7 @@
       api('/api/auth/login/', { email: email, password: pw, remember: $('remember').checked }).then(function (r) {
         if (r.status === 200) return go(r.data);
         setBusy(false);
-        if (r.data.error === 'not_verified') return confirmLater(email); // correct password, e-mail never confirmed
+        if (r.data.error === 'not_verified') return confirmLater(email);
         showError(r.data.error || 'network', r.data);
       });
     } else if (mode === 'signup') {
@@ -173,7 +164,6 @@
     }
   }
 
-  // Logging in with an account whose e-mail is not confirmed yet: send the code and ask for it.
   function confirmLater(email) {
     setBusy(true);
     api('/api/auth/resend/', { email: email }).then(function (r) {
@@ -221,11 +211,10 @@
     });
   }
 
-  // ── wiring ─────────────────────────────────────────────────────────────
   $('code').addEventListener('input', function () {
     var c = $('code');
     c.value = c.value.replace(/\D/g, '').slice(0, 6);
-    if (c.value.length === 6 && !state.busy && state.kind === 'confirm') verify(); // reset also needs the new password
+    if (c.value.length === 6 && !state.busy && state.kind === 'confirm') verify();
   });
   $('auth-form').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -236,14 +225,12 @@
   $('back').addEventListener('click', function () { clearInterval(state.timer); state.secs = 0; state.info = null; clearError(); goStep('form'); });
   document.querySelectorAll('.pw-toggle').forEach(function (b) { b.addEventListener('click', function () { setPwVisible(!state.pwVisible); }); });
 
-  // language menu
   $('lang-btn').addEventListener('click', function (e) { e.stopPropagation(); $('lang-menu').hidden = !$('lang-menu').hidden; });
   document.querySelectorAll('[data-lang]').forEach(function (b) {
     b.addEventListener('click', function () { I18N.set(b.dataset.lang); $('lang-menu').hidden = true; render(); updateAlready(); });
   });
   document.addEventListener('click', function () { $('lang-menu').hidden = true; });
 
-  // already signed in?
   var me = null;
   function updateAlready() {
     if (!me) return;

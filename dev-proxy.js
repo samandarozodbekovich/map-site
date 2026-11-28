@@ -1,4 +1,3 @@
-
 const http = require('http');
 const net = require('net');
 const fs = require('fs');
@@ -20,7 +19,6 @@ const MIME = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
 };
 
-// path prefix -> [target, prefix to strip]
 function route(url) {
   if (url === '/edit') return { redirect: '/edit/' };
   if (url.startsWith('/edit/')) return { t: T.editor, url: url.slice('/edit'.length) };
@@ -44,8 +42,8 @@ function proxy(req, res, target, url) {
   req.pipe(p);
 }
 
-// Pretty URLs (same as openstreetmap.org: /login and /user/new) all serve the one auth page
-const PAGES = { '/login': '/auth.html', '/signup': '/auth.html', '/user/new': '/auth.html', '/forgot': '/auth.html' };
+const PAGES = { '/login': '/auth.html', '/signup': '/auth.html', '/user/new': '/auth.html', '/forgot': '/auth.html',
+  '/terms': '/legal.html', '/privacy': '/legal.html' };
 
 function serveStatic(req, res) {
   let pathname = decodeURIComponent(req.url.split('?')[0]);
@@ -57,7 +55,6 @@ function serveStatic(req, res) {
     res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
     return fs.createReadStream(file).pipe(res);
   }
-  // Not in public/: the iD editor loads absolute assets (e.g. /dist/...), so try the editor.
   proxy(req, res, T.editor, req.url);
 }
 
@@ -68,7 +65,6 @@ const server = http.createServer((req, res) => {
   proxy(req, res, r.t, r.url);
 });
 
-// WebSocket upgrade (editor live-reload)
 server.on('upgrade', (req, socket, head) => {
   const r = route(req.url);
   const target = r && r.t ? r.t : T.editor;
